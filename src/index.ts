@@ -598,7 +598,7 @@ bot.command('lastbuy', async (ctx) => {
   try {
     log('Starting lastbuy command');
     const collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
-    const limit = 2; // Limit to 1 sale
+    const limit = 1; // Limit to 1 sale
     
     log(`Fetching sales for collection: ${collectionSymbol}, limit: ${limit}`);
     
