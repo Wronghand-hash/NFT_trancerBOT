@@ -1,7 +1,7 @@
 import { Telegraf, Markup } from 'telegraf';
 import * as dotenv from 'dotenv';
 import process from 'process';
-import express from 'express';
+import express, { Request, Response } from 'express';
 
 dotenv.config();
 
@@ -78,7 +78,7 @@ async function getAssetsByGroup(symbol: string, collectionAddress: string) {
   try {
     // Get collection info from Magic Eden
     const meInfo = await getMagicEdenCollectionInfo(symbol);
-    
+
     if (!meInfo) {
       throw new Error('Could not fetch collection info');
     }
@@ -90,7 +90,7 @@ async function getAssetsByGroup(symbol: string, collectionAddress: string) {
       4,
       2000
     );
-    
+
     const data = await response.json();
     return {
       assets: data || [],
@@ -106,10 +106,10 @@ async function getAssetsByGroup(symbol: string, collectionAddress: string) {
 bot.command('trench', async (ctx) => {
   try {
     await ctx.reply('🔄 Fetching Trench Demons collection data...');
-    
+
     const collection = COLLECTIONS.TRENCH_DEMONS;
     const { assets, stats } = await getAssetsByGroup(collection.symbol, collection.mint);
-    
+
     if (!stats) {
       return ctx.reply('❌ Could not fetch Trench Demons collection info.');
     }
@@ -137,7 +137,7 @@ bot.command('trench', async (ctx) => {
       `24h Volume: ${((stats.volumeAll || 0) / 1e9).toFixed(2)} SOL\n\n` +
       `🔗 <a href="${collection.marketplace_url}">View on Magic Eden</a>\n\n` +
       `Use /floor ${collection.symbol} to check latest stats`,
-      { 
+      {
         parse_mode: 'HTML',
       }
     );
@@ -152,7 +152,7 @@ bot.command('trench', async (ctx) => {
 async function trackCollectionActivity(collectionSymbol: string, collectionAddress: string) {
   try {
     const { assets, stats } = await getAssetsByGroup(collectionSymbol, collectionAddress);
-    
+
     if (assets.length === 0) {
       return;
     }
@@ -195,7 +195,7 @@ function getCollectionSubscribers(collectionSymbol: string): number[] {
 // Modify the track command to use Magic Eden API
 bot.command('track', async (ctx) => {
   const mintAddress = ctx.message.text.split(' ')[1];
-  
+
   if (!mintAddress) {
     return ctx.reply('Please provide an NFT mint address. Example: /track D3XrkNZz6wx6cofot7Zohsf2KSZ2Er8M6Ya8DkE3eG9U');
   }
@@ -213,13 +213,13 @@ bot.command('track', async (ctx) => {
       3,
       1000
     );
-    
+
     if (!response.ok) {
       throw new Error('Failed to fetch NFT details');
     }
 
     const nftData = await response.json();
-    
+
     // Add to tracking
     trackedNFTs.push({
       mintAddress,
@@ -236,18 +236,18 @@ bot.command('track', async (ctx) => {
 
     // Create buttons for alert setting and viewing collection
     const buttons = [];
-    
+
     // Add alert button
-    buttons.push([{ 
-      text: '⏰ Set price alert', 
-      callback_data: `alert_${mintAddress}` 
+    buttons.push([{
+      text: '⏰ Set price alert',
+      callback_data: `alert_${mintAddress}`
     }]);
-    
+
     // Add collection button if available
     if (nftData.collection) {
-      buttons.push([{ 
-        text: '🔍 View on Magic Eden', 
-        url: `https://magiceden.io/items/${nftData.collection}` 
+      buttons.push([{
+        text: '🔍 View on Magic Eden',
+        url: `https://magiceden.io/items/${nftData.collection}`
       }]);
     }
 
@@ -255,17 +255,17 @@ bot.command('track', async (ctx) => {
     if (nftData.image) {
       // Send NFT image with all details in caption
       const imageSuccess = await safelySendImage(ctx, nftData.image, caption, "NFT image unavailable", buttons);
-      
+
       // Only send text message if image sending failed
       if (!imageSuccess) {
-        await ctx.reply(caption, { 
+        await ctx.reply(caption, {
           parse_mode: 'HTML',
           reply_markup: { inline_keyboard: buttons }
         });
       }
     } else {
       // No image available, just send text
-      await ctx.reply(caption, { 
+      await ctx.reply(caption, {
         parse_mode: 'HTML',
         reply_markup: { inline_keyboard: buttons }
       });
@@ -278,12 +278,12 @@ bot.command('track', async (ctx) => {
 
 bot.command('untrack', (ctx) => {
   const mintAddress = ctx.message.text.split(' ')[1];
-  
+
   if (!mintAddress) {
     return ctx.reply('Please provide an NFT mint address to untrack.');
   }
 
-  const index = trackedNFTs.findIndex(nft => 
+  const index = trackedNFTs.findIndex(nft =>
     nft.mintAddress === mintAddress && nft.chatId === ctx.chat!.id
   );
 
@@ -298,13 +298,13 @@ bot.command('untrack', (ctx) => {
 // Update list command to use Magic Eden API
 bot.command('list', async (ctx) => {
   const userNFTs = trackedNFTs.filter(nft => nft.chatId === ctx.chat!.id);
-  
+
   if (userNFTs.length === 0) {
     return ctx.reply('You are not tracking any NFTs yet. Use /track [mint_address] to start.');
   }
 
   let message = '📋 *Your Tracked NFTs*\n\n';
-  
+
   for (const nft of userNFTs) {
     try {
       const response = await retryFetch(
@@ -313,12 +313,12 @@ bot.command('list', async (ctx) => {
         2,
         800
       );
-      
+
       if (response.ok) {
         const nftData = await response.json();
         message += `🔹 *${nftData.name}*\n` +
-                  `Mint: ${nft.mintAddress.slice(0, 6)}...${nft.mintAddress.slice(-4)}\n` +
-                  `Collection: ${nftData.collection || 'N/A'}\n`;
+          `Mint: ${nft.mintAddress.slice(0, 6)}...${nft.mintAddress.slice(-4)}\n` +
+          `Collection: ${nftData.collection || 'N/A'}\n`;
         if (nft.alertPrice) {
           message += `Alert: ${nft.alertPrice} SOL\n`;
         }
@@ -338,12 +338,12 @@ bot.command('list', async (ctx) => {
 bot.command('alert', async (ctx) => {
   const [_, mintAddress, priceStr] = ctx.message.text.split(' ');
   const price = parseFloat(priceStr);
-  
+
   if (!mintAddress || isNaN(price)) {
     return ctx.reply('Please provide a valid mint address and price. Example: /alert D3XrkNZz... 5.5');
   }
 
-  const nftIndex = trackedNFTs.findIndex(nft => 
+  const nftIndex = trackedNFTs.findIndex(nft =>
     nft.mintAddress === mintAddress && nft.chatId === ctx.chat!.id
   );
 
@@ -367,14 +367,14 @@ setInterval(async () => {
           2,
           800
         );
-        
+
         if (!response.ok) {
           continue;
         }
 
         const nftData = await response.json();
         const currentPrice = nftData.price || 0;
-        
+
         // Check if price dropped below alert threshold
         if (nft.alertPrice && currentPrice > 0 && currentPrice <= nft.alertPrice * 1e9) {
           bot.telegram.sendMessage(
@@ -386,11 +386,11 @@ setInterval(async () => {
             `Mint: ${nft.mintAddress}`,
             { parse_mode: 'Markdown' }
           );
-          
+
           // Remove alert after triggering
           nft.alertPrice = undefined;
         }
-        
+
         // Update last price
         nft.lastPrice = currentPrice;
       } catch (error) {
@@ -412,7 +412,7 @@ setInterval(async () => {
 // Add collection-specific commands
 bot.command('collection', async (ctx) => {
   const collectionAddress = ctx.message.text.split(' ')[1];
-  
+
   if (!collectionAddress) {
     return ctx.reply('Please provide a collection address. Example: /collection DPduL1SWjhjpUxcNUBQsbHiJfeMr8ayJki8vGnfuN1Gj');
   }
@@ -427,21 +427,21 @@ bot.command('collection', async (ctx) => {
 
 bot.command('floor', async (ctx) => {
   const collectionAddress = ctx.message.text.split(' ')[1];
-  
+
   if (!collectionAddress) {
     // Show floor price for all tracked collections
     const floorInfo = Object.entries(trackedCollections)
-      .map(([symbol, data]) => 
+      .map(([symbol, data]) =>
         `${data.name || symbol}:\n` +
         `Floor: ${((data.floorPrice || 0) / 1e9).toFixed(3)} SOL\n` +
         `Listed: ${data.listedCount}\n` +
         `${data.marketplace_url ? `🔗 <a href="${data.marketplace_url}">View on Magic Eden</a>` : ''}`
       )
       .join('\n\n');
-    
+
     return ctx.reply(
       `<b>Floor Prices</b>\n\n${floorInfo || 'No collections tracked.'}`,
-      { 
+      {
         parse_mode: 'HTML',
       }
     );
@@ -457,11 +457,11 @@ bot.command('floor', async (ctx) => {
     `Floor Price: ${((collection.floorPrice || 0) / 1e9).toFixed(3)} SOL\n` +
     `Listed Count: ${collection.listedCount}\n` +
     `24h Volume: ${((collection.volume24h || 0) / 1e9).toFixed(2)} SOL\n` +
-    `${collection.lastSale ? 
-      `Last Sale: ${(collection.lastSale.price / 1e9).toFixed(3)} SOL (${formatDate(collection.lastSale.timestamp)})` 
+    `${collection.lastSale ?
+      `Last Sale: ${(collection.lastSale.price / 1e9).toFixed(3)} SOL (${formatDate(collection.lastSale.timestamp)})`
       : ''}\n\n` +
     `${collection.marketplace_url ? `🔗 <a href="${collection.marketplace_url}">View on Magic Eden</a>` : ''}`,
-    { 
+    {
       parse_mode: 'HTML',
     }
   );
@@ -480,18 +480,18 @@ function log(message: string, data?: any) {
 // Add a human-readable date formatter
 function formatDate(timestamp: number | string | Date): string {
   const date = new Date(timestamp);
-  
+
   // Format: "May 15, 2023 at 14:30"
-  return date.toLocaleDateString('en-US', { 
+  return date.toLocaleDateString('en-US', {
     year: 'numeric',
-    month: 'short', 
+    month: 'short',
     day: 'numeric'
-  }) + ' at ' + 
-  date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true
-  });
+  }) + ' at ' +
+    date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
 }
 
 // Add a timeout wrapper function
@@ -515,7 +515,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessa
 // Add a retry function for API calls
 async function retryFetch(url: string, options: RequestInit = {}, maxRetries = 3, delay = 1000): Promise<Response> {
   let lastError: Error | null = null;
-  
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       log(`Fetch attempt ${attempt}/${maxRetries}: ${url.substring(0, 70)}...`);
@@ -528,7 +528,7 @@ async function retryFetch(url: string, options: RequestInit = {}, maxRetries = 3
       lastError = err instanceof Error ? err : new Error(String(err));
       log(`Fetch attempt ${attempt} failed: ${lastError.message}`);
     }
-    
+
     if (attempt < maxRetries) {
       // Wait before next retry, with exponential backoff
       const waitTime = delay * Math.pow(1.5, attempt - 1);
@@ -536,7 +536,7 @@ async function retryFetch(url: string, options: RequestInit = {}, maxRetries = 3
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
-  
+
   throw lastError || new Error('Maximum retries reached');
 }
 
@@ -544,13 +544,13 @@ async function retryFetch(url: string, options: RequestInit = {}, maxRetries = 3
 async function safelySendImage(ctx: any, imageUrl: string, captionText: string, fallbackMessage: string, inlineButtons?: any[][]): Promise<boolean> {
   try {
     log(`Attempting to send image with caption: ${imageUrl.substring(0, 50)}...`);
-    
+
     // 1. Try sending as photo with caption
     try {
       await withTimeout(
         ctx.replyWithPhoto(
           { url: imageUrl },
-          { 
+          {
             caption: captionText,
             parse_mode: 'HTML',
             reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
@@ -563,12 +563,12 @@ async function safelySendImage(ctx: any, imageUrl: string, captionText: string, 
       return true;
     } catch (error) {
       log('Primary image send failed, trying alternative method', error);
-      
+
       // 2. Try with a different approach - send preview using a direct link with caption
       try {
         const previewText = `<a href="${imageUrl}">🖼</a> ${captionText}`;
         await withTimeout(
-          ctx.reply(previewText, { 
+          ctx.reply(previewText, {
             parse_mode: 'HTML',
             disable_web_page_preview: false,
             reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
@@ -580,7 +580,7 @@ async function safelySendImage(ctx: any, imageUrl: string, captionText: string, 
         return true;
       } catch (secondError) {
         log('All image sending methods failed', secondError);
-        
+
         // 3. Send text fallback
         await ctx.reply(fallbackMessage || captionText, {
           reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
@@ -600,9 +600,9 @@ bot.command('lastbuy', async (ctx) => {
     log('Starting lastbuy command');
     const collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
     const limit = 1; // Limit to 1 sale
-    
+
     log(`Fetching sales for collection: ${collectionSymbol}, limit: ${limit}`);
-    
+
     try {
       await withTimeout(
         ctx.reply(`🔍 Finding the latest NFT sales for ${collectionSymbol}...`),
@@ -622,14 +622,14 @@ bot.command('lastbuy', async (ctx) => {
         3,
         1000
       );
-      
+
       log(`API response status: ${response.status}`);
-      
+
       log('Parsing API response');
       const activities = await response.json();
-      
+
       log(`Received ${activities?.length || 0} activities`);
-      
+
       if (!activities || !Array.isArray(activities)) {
         log('Invalid response format', activities);
         throw new Error('Invalid response format from Magic Eden API');
@@ -638,15 +638,15 @@ bot.command('lastbuy', async (ctx) => {
       if (activities.length === 0) {
         log('No activities found');
         return ctx.reply(`No recent sales found for collection "${collectionSymbol}" on Magic Eden. This could mean:\n` +
-                        `1. The collection symbol might be incorrect\n` +
-                        `2. No recent sales have occurred\n` +
-                        `3. The API might be having temporary issues\n\n` +
-                        `Try again in a few moments or verify the collection symbol.`);
+          `1. The collection symbol might be incorrect\n` +
+          `2. No recent sales have occurred\n` +
+          `3. The API might be having temporary issues\n\n` +
+          `Try again in a few moments or verify the collection symbol.`);
       }
 
       // Send a summary message first
       log(`Found ${activities.length} activities, sending details`);
-      
+
       // Process each sale with a timeout to avoid getting stuck
       let processedCount = 0;
       for (const sale of activities.slice(0, limit)) {
@@ -657,11 +657,11 @@ bot.command('lastbuy', async (ctx) => {
             buyer: sale.buyer?.substring(0, 10) + '...',
             timestamp: sale.createdAt
           });
-          
+
           // Get NFT details from Magic Eden with improved reliability
           let nftName = `${collectionSymbol} #${sale.tokenMint?.substring(0, 6)}`;
           let imageUrl = '';
-          
+
           try {
             const nftDetailsResponse = await retryFetch(
               `https://api-mainnet.magiceden.dev/v2/tokens/${sale.tokenMint}`,
@@ -669,7 +669,7 @@ bot.command('lastbuy', async (ctx) => {
               2,  // Fewer retries for NFT details
               800  // Shorter delay
             );
-            
+
             if (nftDetailsResponse.ok) {
               const nftDetails = await nftDetailsResponse.json();
               if (nftDetails && nftDetails.name) {
@@ -681,15 +681,15 @@ bot.command('lastbuy', async (ctx) => {
             log(`Could not fetch NFT details: ${detailsError instanceof Error ? detailsError.message : String(detailsError)}`, detailsError);
             // Continue with the default values set above
           }
-          
+
           // Format NFT info with minimal info
           const price = (sale.price || 0);
           const buyerAddress = sale.buyer || 'Unknown';
-          
+
           // Format buyer address for readability
           const formatAddress = (address: string) => {
-            return address.length > 10 ? 
-              `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : 
+            return address.length > 10 ?
+              `${address.substring(0, 6)}...${address.substring(address.length - 4)}` :
               address;
           };
 
@@ -700,7 +700,7 @@ bot.command('lastbuy', async (ctx) => {
             `💎 <b>Price:</b> ${price.toFixed(3)} SOL\n` +
             `👤 <b>Buyer:</b> <a href="https://solscan.io/account/${buyerAddress}">${formatAddress(buyerAddress)}</a>\n` +
             `\n#NFT #Solana #${collectionSymbol.replace(/_/g, '')}`;
-          
+
           // Create inline keyboard buttons for marketplaces
           const inlineButtons = [
             [
@@ -708,10 +708,10 @@ bot.command('lastbuy', async (ctx) => {
               { text: '📊 View on Tensor', url: `https://tensor.trade/item/${sale.tokenMint}` }
             ]
           ];
-          
+
           // Create a fallback message without HTML for error cases
           const fallbackMessage = `New Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}`;
-          
+
           // Send message and image with caption
           log('Sending sale info');
           try {
@@ -726,12 +726,12 @@ bot.command('lastbuy', async (ctx) => {
           } catch (messageError) {
             log('Error sending sale message', messageError);
           }
-          
+
           // Add a small delay between messages to prevent rate limiting
           log('Adding delay between messages');
           await new Promise(resolve => setTimeout(resolve, 300));
           log('Delay completed');
-          
+
           processedCount++;
         } catch (error) {
           log('Error processing sale', error);
@@ -768,14 +768,14 @@ bot.command('lastbuy', async (ctx) => {
 bot.action(/alert_(.+)/, async (ctx) => {
   try {
     const mintAddress = ctx.match[1];
-    
+
     // Reply with instructions on how to set alert
     await ctx.reply(
       `To set a price alert for this NFT, please use the command:\n\n` +
       `/alert ${mintAddress} [price_in_sol]\n\n` +
       `Example: /alert ${mintAddress} 2.5`
     );
-    
+
     // Answer the callback query to remove loading state
     await ctx.answerCbQuery();
   } catch (error) {
@@ -784,11 +784,11 @@ bot.action(/alert_(.+)/, async (ctx) => {
   }
 });
 const app = express();
-const port = process.env.PORT || 10000;
+const port = Number(process.env.PORT) || 10000;
 
-app.get('/', (req, res) => res.send('Bot is running'));
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Server running on http://0.0.0.0:${port}`);
+app.get('/', (_req: any, res: any) => res.send('Bot is running'));
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
 // Start the bot
 bot.launch();
