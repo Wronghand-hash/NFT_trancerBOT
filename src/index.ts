@@ -1,28 +1,20 @@
 import { Telegraf, Markup } from 'telegraf';
 import * as dotenv from 'dotenv';
-import { Connection, PublicKey } from '@solana/web3.js';
-import { Metaplex } from '@metaplex-foundation/js';
 import process from 'process';
 
 dotenv.config();
 
 // Environment variables
-const requiredEnvVars = ['BOT_TOKEN', 'RPC_URL'];
+const requiredEnvVars = ['BOT_TOKEN'];
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
     throw new Error(`${envVar} is missing from .env file`);
   }
 }
 
-// Initialize bot and Solana connection
+// Initialize bot
 const bot = new Telegraf(process.env.BOT_TOKEN!);
-console.log('Connecting to Solana RPC:', process.env.RPC_URL);
-const connection = new Connection(process.env.RPC_URL!, {
-  commitment: 'confirmed',
-  confirmTransactionInitialTimeout: 30000 // 30 seconds
-});
-const metaplex = new Metaplex(connection);
-console.log('Metaplex initialized');
+console.log('Bot initialized');
 
 // Store tracked NFTs and user alerts
 interface TrackedNFT {
@@ -39,6 +31,8 @@ const trackedNFTs: TrackedNFT[] = [];
 // Collection tracking interface
 interface CollectionActivity {
   symbol: string;
+  name?: string;
+  marketplace_url?: string;
   floorPrice?: number;
   lastSale?: {
     price: number;
@@ -58,145 +52,129 @@ const formatPrice = (lamports: number) => {
 
 // Collection addresses
 const COLLECTIONS = {
-  TRENCH_DEMONS: 'trench_demons', // Collection symbol/identifier
-  TRENCH_DEMONS_MINT: 'DPduL1SWjhjpUxcNUBQsbHiJfeMr8ayJki8vGnfuN1Gj' // Example NFT from the collection
+  TRENCH_DEMONS: {
+    symbol: 'trench_demons',
+    name: 'Trench Demons',
+    marketplace_url: 'https://magiceden.us/marketplace/trench_demons',
+    mint: 'DPduL1SWjhjpUxcNUBQsbHiJfeMr8ayJki8vGnfuN1Gj'
+  }
 } as const;
 
-// Command handlers
-bot.start((ctx) => {
-  const welcomeMessage = `
-🎨 *NFT Tracker Bot* 🖼️\n\n` +
-    `I can help you track your favorite NFTs on Solana!\n\n` +
-    `*Available commands:*\n` +
-    `/track [mint_address] - Track an NFT\n` +
-    `/untrack [mint_address] - Stop tracking an NFT\n` +
-    `/list - Show all tracked NFTs\n` +
-    `/alert [mint_address] [price_in_sol] - Set price alert\n`;
+// Add Magic Eden API helper
+async function getMagicEdenCollectionInfo(symbol: string) {
+  try {
+    const response = await retryFetch(`https://api-mainnet.magiceden.dev/v2/collections/${symbol}/stats`);
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching from Magic Eden:', error);
+    return null;
+  }
+}
+
+// Update getAssetsByGroup to use only Magic Eden API
+async function getAssetsByGroup(symbol: string, collectionAddress: string) {
+  try {
+    // Get collection info from Magic Eden
+    const meInfo = await getMagicEdenCollectionInfo(symbol);
     
-  ctx.replyWithMarkdown(welcomeMessage);
-});
+    if (!meInfo) {
+      throw new Error('Could not fetch collection info');
+    }
 
-bot.command('help', (ctx) => {
-  ctx.replyWithMarkdown(
-    `*Available commands:*\n\n` +
-    `*NFT Tracking:*\n` +
-    `/track [mint_address] - Track any NFT\n` +
-    `/untrack [mint_address] - Stop tracking an NFT\n` +
-    `/list - Show all tracked NFTs\n` +
-    `/alert [mint_address] [price_in_sol] - Set price alert\n\n` +
-    `*Collection Tracking:*\n` +
-    `/collection [address] - Track a collection\n` +
-    `/floor [address] - Show collection floor price and stats\n` +
-    `/trench - Track Trench Demons collection`
-  );
-});
+    // Get recent sales from Magic Eden
+    const response = await retryFetch(
+      `https://api-mainnet.magiceden.dev/v2/collections/${symbol}/activities?offset=0&limit=2&type=buyNow`,
+      {},
+      4,
+      2000
+    );
+    
+    const data = await response.json();
+    return {
+      assets: data || [],
+      stats: meInfo
+    };
+  } catch (error) {
+    console.error('Error fetching collection data:', error);
+    return { assets: [], stats: null };
+  }
+}
 
-// Track Trench Demons collection
+// Update trench command
 bot.command('trench', async (ctx) => {
   try {
     await ctx.reply('🔄 Fetching Trench Demons collection data...');
     
-    // First, let's try to find NFTs from the collection
-    const nfts = await metaplex.nfts().findAllByCreator({
-      creator: new PublicKey('DPduL1SWjhjpUxcNUBQsbHiJfeMr8ayJki8vGnfuN1Gj')
-    });
+    const collection = COLLECTIONS.TRENCH_DEMONS;
+    const { assets, stats } = await getAssetsByGroup(collection.symbol, collection.mint);
     
-    if (nfts.length === 0) {
-      return ctx.reply('❌ Could not find any NFTs from the Trench Demons collection.');
+    if (!stats) {
+      return ctx.reply('❌ Could not fetch Trench Demons collection info.');
     }
-    
-    // Take the first NFT from the collection
-    const nft = nfts[0];
-    const mintAddress = nft.address.toBase58();
-    
-    // Check if already tracked
-    if (trackedNFTs.some(nft => nft.mintAddress === mintAddress && nft.chatId === ctx.chat!.id)) {
-      return ctx.reply('You are already tracking this Trench Demons NFT!');
-    }
-    
-    // Get full NFT data
-    const nftData = await metaplex.nfts().findByMint({ mintAddress: nft.address });
-    
-    // Add to tracking
-    trackedNFTs.push({
-      mintAddress,
-      chatId: ctx.chat!.id,
-      name: nftData.name || 'Unnamed NFT'
-    });
 
-    // Send confirmation with more details
-    try {
-      await ctx.replyWithPhoto(
-        { url: nftData.json?.image || 'https://via.placeholder.com/400x400?text=No+Image' },
-        {
-          caption: `✅ *Now tracking Trench Demons NFT*\n` +
-                  `Name: ${nftData.name || 'N/A'}\n` +
-                  `Mint: ${mintAddress.slice(0, 6)}...${mintAddress.slice(-4)}\n` +
-                  `Collection: ${nftData.json?.collection?.name || 'Trench Demons'}\n` +
-                  `Use /alert ${mintAddress} [price] to set a price alert`,
-          parse_mode: 'Markdown'
-        }
-      );
-    } catch (sendError) {
-      console.error('Error sending message:', sendError);
-      // If photo fails, try sending text only
-      await ctx.reply(
-        `✅ Now tracking Trench Demons NFT\n` +
-        `Name: ${nftData.name || 'N/A'}\n` +
-        `Mint: ${mintAddress.slice(0, 6)}...${mintAddress.slice(-4)}`
-      );
-    }
+    // Add collection to tracking
+    trackedCollections[collection.symbol] = {
+      symbol: collection.symbol,
+      name: collection.name,
+      marketplace_url: collection.marketplace_url,
+      floorPrice: stats.floorPrice || 0,
+      volume24h: stats.volumeAll || 0,
+      listedCount: stats.listedCount || 0,
+      lastSale: assets[0] ? {
+        price: assets[0].price || 0,
+        timestamp: assets[0].timestamp || Date.now(),
+        tokenMint: assets[0].mint || ''
+      } : undefined
+    };
+
+    // Send collection info with marketplace link
+    await ctx.reply(
+      `✅ <b>Now tracking ${collection.name}</b>\n\n` +
+      `Floor Price: ${((stats.floorPrice || 0) / 1e9).toFixed(3)} SOL\n` +
+      `Listed Count: ${stats.listedCount || 0}\n` +
+      `24h Volume: ${((stats.volumeAll || 0) / 1e9).toFixed(2)} SOL\n\n` +
+      `🔗 <a href="${collection.marketplace_url}">View on Magic Eden</a>\n\n` +
+      `Use /floor ${collection.symbol} to check latest stats`,
+      { 
+        parse_mode: 'HTML',
+      }
+    );
+
   } catch (error: any) {
     console.error('Error in trench command:', error);
-    ctx.reply(`❌ Failed to track Trench Demons collection. Error: ${error?.message || 'Unknown error'}`);
+    ctx.reply('❌ Failed to track Trench Demons. Please try again later.');
   }
 });
 
-// Function to track collection activities
+// Update trackCollectionActivity to use only Magic Eden API
 async function trackCollectionActivity(collectionSymbol: string, collectionAddress: string) {
   try {
-    // Get all NFTs from collection
-    const nfts = await metaplex.nfts().findAllByCreator({
-      creator: new PublicKey(collectionAddress)
-    });
+    const { assets, stats } = await getAssetsByGroup(collectionSymbol, collectionAddress);
+    
+    if (assets.length === 0) {
+      return;
+    }
 
-    // Get listed NFTs and their prices
-    const listedNFTs = await Promise.all(nfts.map(async (nft) => {
-      try {
-        const auctionHouse = await metaplex.auctionHouse().findByAddress({
-          address: new PublicKey('8Z1Q6jbPJEubzGqRyQKb5HVvpUey1fcLdLU8RfPZu6fM') // Default Metaplex Auction House
-        });
-        const listings = await metaplex.auctionHouse().findListings({
-          auctionHouse,
-          mint: nft.address,
-        });
-        return listings.filter(l => l.canceledAt === null);
-      } catch (e) {
-        console.error(`Error fetching listings for ${nft.address}:`, e);
-        return [];
-      }
-    }));
-
-    // Calculate floor price
-    const floorPrice = Math.min(
-      ...listedNFTs.flat().map(l => Number(l.price.basisPoints.toString()) / 1e9)
-    );
-
-    // Update collection activity
+    // Update collection activity with available data
     trackedCollections[collectionSymbol] = {
       symbol: collectionSymbol,
-      floorPrice: floorPrice || 0,
-      volume24h: 0, // You'll need to implement 24h volume tracking
-      listedCount: listedNFTs.flat().length
+      floorPrice: stats?.floorPrice || 0,
+      volume24h: stats?.volumeAll || 0,
+      listedCount: stats?.listedCount || 0,
+      lastSale: assets[0] ? {
+        price: assets[0].price || 0,
+        timestamp: new Date(assets[0].createdAt).getTime() || Date.now(),
+        tokenMint: assets[0].tokenMint || ''
+      } : undefined
     };
 
-    // Notify users about significant changes
+    // Notify users about the update
     for (const chatId of getCollectionSubscribers(collectionSymbol)) {
       bot.telegram.sendMessage(chatId,
         `📊 *${collectionSymbol} Update*\n` +
-        `Floor Price: ${floorPrice.toFixed(2)} SOL\n` +
-        `Listed Count: ${listedNFTs.flat().length}\n` +
-        `Last Updated: ${new Date().toLocaleString()}\n`,
+        `Listed Count: ${assets.length}\n` +
+        `Last Updated: ${formatDate(new Date())}\n`,
         { parse_mode: 'Markdown' }
       );
     }
@@ -213,7 +191,7 @@ function getCollectionSubscribers(collectionSymbol: string): number[] {
     .map(nft => nft.chatId);
 }
 
-// Modify the track command to include collection information
+// Modify the track command to use Magic Eden API
 bot.command('track', async (ctx) => {
   const mintAddress = ctx.message.text.split(' ')[1];
   
@@ -222,42 +200,75 @@ bot.command('track', async (ctx) => {
   }
 
   try {
-    // Validate mint address
-    new PublicKey(mintAddress);
-    
     // Check if already tracked
     if (trackedNFTs.some(nft => nft.mintAddress === mintAddress && nft.chatId === ctx.chat!.id)) {
       return ctx.reply('This NFT is already being tracked!');
     }
 
-    // Get NFT metadata
-    const nft = await metaplex.nfts().findByMint({ mintAddress: new PublicKey(mintAddress) });
+    // Get NFT details from Magic Eden
+    const response = await retryFetch(
+      `https://api-mainnet.magiceden.dev/v2/tokens/${mintAddress}`,
+      {},
+      3,
+      1000
+    );
     
-    // Add to tracking with collection info
+    if (!response.ok) {
+      throw new Error('Failed to fetch NFT details');
+    }
+
+    const nftData = await response.json();
+    
+    // Add to tracking
     trackedNFTs.push({
       mintAddress,
       chatId: ctx.chat!.id,
-      name: nft.name || 'Unnamed NFT',
-      collection: nft.collection?.address.toString() || undefined
+      name: nftData.name || 'Unnamed NFT',
+      collection: nftData.collection || undefined
     });
 
-    // If this is a new collection, start tracking it
-    if (nft.collection && !trackedCollections[nft.collection.address.toString()]) {
-      trackCollectionActivity(nft.collection.address.toString(), nft.collection.address.toString());
+    // Create detailed caption for image with HTML formatting
+    const caption = `✅ <b>Now tracking NFT</b>\n\n` +
+      `<b>Name:</b> ${nftData.name}\n` +
+      `<b>Mint:</b> ${mintAddress.slice(0, 6)}...${mintAddress.slice(-4)}` +
+      (nftData.collection ? `\n<b>Collection:</b> ${nftData.collection}` : '');
+
+    // Create buttons for alert setting and viewing collection
+    const buttons = [];
+    
+    // Add alert button
+    buttons.push([{ 
+      text: '⏰ Set price alert', 
+      callback_data: `alert_${mintAddress}` 
+    }]);
+    
+    // Add collection button if available
+    if (nftData.collection) {
+      buttons.push([{ 
+        text: '🔍 View on Magic Eden', 
+        url: `https://magiceden.io/items/${nftData.collection}` 
+      }]);
     }
 
-    // Send confirmation
-    await ctx.replyWithPhoto(
-      { url: nft.json?.image || '' },
-      {
-        caption: `✅ *Now tracking NFT*\n` +
-                `Name: ${nft.name}\n` +
-                `Mint: ${mintAddress}\n` +
-                `Collection: ${nft.collection?.address.toString() || 'N/A'}\n` +
-                `Use /alert ${mintAddress} [price] to set a price alert`,
-        parse_mode: 'Markdown'
+    // Send confirmation with image and caption
+    if (nftData.image) {
+      // Send NFT image with all details in caption
+      const imageSuccess = await safelySendImage(ctx, nftData.image, caption, "NFT image unavailable", buttons);
+      
+      // Only send text message if image sending failed
+      if (!imageSuccess) {
+        await ctx.reply(caption, { 
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: buttons }
+        });
       }
-    );
+    } else {
+      // No image available, just send text
+      await ctx.reply(caption, { 
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: buttons }
+      });
+    }
   } catch (error) {
     console.error('Error tracking NFT:', error);
     ctx.reply('❌ Failed to track NFT. Please check the mint address and try again.');
@@ -283,6 +294,7 @@ bot.command('untrack', (ctx) => {
   ctx.reply('✅ NFT is no longer being tracked.');
 });
 
+// Update list command to use Magic Eden API
 bot.command('list', async (ctx) => {
   const userNFTs = trackedNFTs.filter(nft => nft.chatId === ctx.chat!.id);
   
@@ -294,14 +306,25 @@ bot.command('list', async (ctx) => {
   
   for (const nft of userNFTs) {
     try {
-      const nftData = await metaplex.nfts().findByMint({ mintAddress: new PublicKey(nft.mintAddress) });
-      message += `🔹 *${nftData.name}*\n` +
-                `Mint: ${nft.mintAddress.slice(0, 6)}...${nft.mintAddress.slice(-4)}\n` +
-                `Collection: ${nftData.json?.collection?.name || 'N/A'}\n`;
-      if (nft.alertPrice) {
-        message += `Alert: ${nft.alertPrice} SOL\n`;
+      const response = await retryFetch(
+        `https://api-mainnet.magiceden.dev/v2/tokens/${nft.mintAddress}`,
+        {},
+        2,
+        800
+      );
+      
+      if (response.ok) {
+        const nftData = await response.json();
+        message += `🔹 *${nftData.name}*\n` +
+                  `Mint: ${nft.mintAddress.slice(0, 6)}...${nft.mintAddress.slice(-4)}\n` +
+                  `Collection: ${nftData.collection || 'N/A'}\n`;
+        if (nft.alertPrice) {
+          message += `Alert: ${nft.alertPrice} SOL\n`;
+        }
+        message += '\n';
+      } else {
+        message += `🔹 ${nft.mintAddress} (Error fetching data)\n\n`;
       }
-      message += '\n';
     } catch (error) {
       console.error('Error fetching NFT data:', error);
       message += `🔹 ${nft.mintAddress} (Error fetching data)\n\n`;
@@ -336,29 +359,20 @@ setInterval(async () => {
   try {
     for (const nft of trackedNFTs) {
       try {
-        // Get the NFT data first
-        const nftData = await metaplex.nfts().findByMint({ mintAddress: new PublicKey(nft.mintAddress) });
+        // Get NFT data from Magic Eden
+        const response = await retryFetch(
+          `https://api-mainnet.magiceden.dev/v2/tokens/${nft.mintAddress}`,
+          {},
+          2,
+          800
+        );
         
-        // Try to get the price from the auction house
-        let currentPrice = 0;
-        try {
-          const auctionHouse = await metaplex.auctionHouse().findByAddress({
-            address: new PublicKey('8Z1Q6jbPJEubzGqRyQKb5HVvpUey1fcLdLU8RfPZu6fM') // Default Metaplex Auction House
-          });
-
-          const listings = await metaplex.auctionHouse().findListings({ 
-            auctionHouse,
-            mint: new PublicKey(nft.mintAddress) 
-          });
-
-          if (listings.length > 0) {
-            // Convert the price to lamports (1 SOL = 1,000,000,000 lamports)
-            currentPrice = listings[0].price.basisPoints.toNumber();
-          }
-        } catch (error) {
-          console.error('Error checking auction house:', error);
-          // If auction house check fails, just continue with price = 0
+        if (!response.ok) {
+          continue;
         }
+
+        const nftData = await response.json();
+        const currentPrice = nftData.price || 0;
         
         // Check if price dropped below alert threshold
         if (nft.alertPrice && currentPrice > 0 && currentPrice <= nft.alertPrice * 1e9) {
@@ -417,12 +431,18 @@ bot.command('floor', async (ctx) => {
     // Show floor price for all tracked collections
     const floorInfo = Object.entries(trackedCollections)
       .map(([symbol, data]) => 
-        `${symbol}:\nFloor: ${data.floorPrice?.toFixed(2) || 'N/A'} SOL\nListed: ${data.listedCount}`
+        `${data.name || symbol}:\n` +
+        `Floor: ${((data.floorPrice || 0) / 1e9).toFixed(3)} SOL\n` +
+        `Listed: ${data.listedCount}\n` +
+        `${data.marketplace_url ? `🔗 <a href="${data.marketplace_url}">View on Magic Eden</a>` : ''}`
       )
       .join('\n\n');
     
-    return ctx.replyWithMarkdown(
-      `*Floor Prices*\n\n${floorInfo || 'No collections tracked.'}`
+    return ctx.reply(
+      `<b>Floor Prices</b>\n\n${floorInfo || 'No collections tracked.'}`,
+      { 
+        parse_mode: 'HTML',
+      }
     );
   }
 
@@ -431,15 +451,336 @@ bot.command('floor', async (ctx) => {
     return ctx.reply('Collection not tracked. Use /collection command first.');
   }
 
-  ctx.replyWithMarkdown(
-    `*${collection.symbol} Stats*\n\n` +
-    `Floor Price: ${collection.floorPrice?.toFixed(2) || 'N/A'} SOL\n` +
+  ctx.reply(
+    `<b>${collection.name || collection.symbol} Stats</b>\n\n` +
+    `Floor Price: ${((collection.floorPrice || 0) / 1e9).toFixed(3)} SOL\n` +
     `Listed Count: ${collection.listedCount}\n` +
-    `24h Volume: ${collection.volume24h?.toFixed(2) || 'N/A'} SOL\n` +
-    `Last Sale: ${collection.lastSale ? 
-      `${collection.lastSale.price.toFixed(2)} SOL (${new Date(collection.lastSale.timestamp).toLocaleString()})` 
-      : 'N/A'}`
+    `24h Volume: ${((collection.volume24h || 0) / 1e9).toFixed(2)} SOL\n` +
+    `${collection.lastSale ? 
+      `Last Sale: ${(collection.lastSale.price / 1e9).toFixed(3)} SOL (${formatDate(collection.lastSale.timestamp)})` 
+      : ''}\n\n` +
+    `${collection.marketplace_url ? `🔗 <a href="${collection.marketplace_url}">View on Magic Eden</a>` : ''}`,
+    { 
+      parse_mode: 'HTML',
+    }
   );
+});
+
+// Add a logger function
+function log(message: string, data?: any) {
+  const timestamp = new Date().toISOString();
+  if (data) {
+    console.log(`[${timestamp}] ${message}`, data);
+  } else {
+    console.log(`[${timestamp}] ${message}`);
+  }
+}
+
+// Add a human-readable date formatter
+function formatDate(timestamp: number | string | Date): string {
+  const date = new Date(timestamp);
+  
+  // Format: "May 15, 2023 at 14:30"
+  return date.toLocaleDateString('en-US', { 
+    year: 'numeric',
+    month: 'short', 
+    day: 'numeric'
+  }) + ' at ' + 
+  date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
+// Add a timeout wrapper function
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  let timeout: NodeJS.Timeout;
+  try {
+    const result = await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`Timeout after ${timeoutMs}ms: ${errorMessage}`));
+        }, timeoutMs);
+      }),
+    ]);
+    return result;
+  } finally {
+    clearTimeout(timeout!);
+  }
+}
+
+// Add a retry function for API calls
+async function retryFetch(url: string, options: RequestInit = {}, maxRetries = 3, delay = 1000): Promise<Response> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      log(`Fetch attempt ${attempt}/${maxRetries}: ${url.substring(0, 70)}...`);
+      const response = await fetch(url, options);
+      if (response.ok) {
+        return response;
+      }
+      lastError = new Error(`HTTP error ${response.status}`);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      log(`Fetch attempt ${attempt} failed: ${lastError.message}`);
+    }
+    
+    if (attempt < maxRetries) {
+      // Wait before next retry, with exponential backoff
+      const waitTime = delay * Math.pow(1.5, attempt - 1);
+      log(`Waiting ${waitTime}ms before next retry`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+  }
+  
+  throw lastError || new Error('Maximum retries reached');
+}
+
+// Add a helper function for safe image sending
+async function safelySendImage(ctx: any, imageUrl: string, captionText: string, fallbackMessage: string, inlineButtons?: any[][]): Promise<boolean> {
+  try {
+    log(`Attempting to send image with caption: ${imageUrl.substring(0, 50)}...`);
+    
+    // 1. Try sending as photo with caption
+    try {
+      await withTimeout(
+        ctx.replyWithPhoto(
+          { url: imageUrl },
+          { 
+            caption: captionText,
+            parse_mode: 'HTML',
+            reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
+          }
+        ),
+        15000, // Longer timeout for image loading
+        'Image send timed out'
+      );
+      log('Image with caption sent successfully');
+      return true;
+    } catch (error) {
+      log('Primary image send failed, trying alternative method', error);
+      
+      // 2. Try with a different approach - send preview using a direct link with caption
+      try {
+        const previewText = `<a href="${imageUrl}">🖼</a> ${captionText}`;
+        await withTimeout(
+          ctx.reply(previewText, { 
+            parse_mode: 'HTML',
+            disable_web_page_preview: false,
+            reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
+          }),
+          10000, // Increased timeout for URL preview
+          'Image URL send timed out'
+        );
+        log('Image URL with caption sent successfully');
+        return true;
+      } catch (secondError) {
+        log('All image sending methods failed', secondError);
+        
+        // 3. Send text fallback
+        await ctx.reply(fallbackMessage || captionText, {
+          reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
+        });
+        return false;
+      }
+    }
+  } catch (e) {
+    log('Fatal error in image sending', e);
+    return false;
+  }
+}
+
+// Update lastbuy command
+bot.command('lastbuy', async (ctx) => {
+  try {
+    log('Starting lastbuy command');
+    const collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
+    const limit = 2; // Limit to 1 sale
+    
+    log(`Fetching sales for collection: ${collectionSymbol}, limit: ${limit}`);
+    
+    try {
+      await withTimeout(
+        ctx.reply(`🔍 Finding the latest NFT sales for ${collectionSymbol}...`),
+        5000,
+        'Initial reply timed out'
+      );
+    } catch (replyError) {
+      log('Warning: Initial reply timed out, continuing anyway', replyError);
+    }
+
+    // Use Magic Eden API for recent activities
+    log('Making API request to Magic Eden');
+    try {
+      const response = await retryFetch(
+        `https://api-mainnet.magiceden.dev/v2/collections/${collectionSymbol}/activities?offset=0&limit=${limit}&type=buyNow`,
+        {},
+        3,
+        1000
+      );
+      
+      log(`API response status: ${response.status}`);
+      
+      log('Parsing API response');
+      const activities = await response.json();
+      
+      log(`Received ${activities?.length || 0} activities`);
+      
+      if (!activities || !Array.isArray(activities)) {
+        log('Invalid response format', activities);
+        throw new Error('Invalid response format from Magic Eden API');
+      }
+
+      if (activities.length === 0) {
+        log('No activities found');
+        return ctx.reply(`No recent sales found for collection "${collectionSymbol}" on Magic Eden. This could mean:\n` +
+                        `1. The collection symbol might be incorrect\n` +
+                        `2. No recent sales have occurred\n` +
+                        `3. The API might be having temporary issues\n\n` +
+                        `Try again in a few moments or verify the collection symbol.`);
+      }
+
+      // Send a summary message first
+      log(`Found ${activities.length} activities, sending details`);
+      
+      // Process each sale with a timeout to avoid getting stuck
+      let processedCount = 0;
+      for (const sale of activities.slice(0, limit)) {
+        try {
+          log(`Processing sale ${processedCount + 1}/${Math.min(limit, activities.length)}`, {
+            tokenMint: sale.tokenMint,
+            price: sale.price,
+            buyer: sale.buyer?.substring(0, 10) + '...',
+            timestamp: sale.createdAt
+          });
+          
+          // Get NFT details from Magic Eden with improved reliability
+          let nftName = `${collectionSymbol} #${sale.tokenMint?.substring(0, 6)}`;
+          let imageUrl = '';
+          
+          try {
+            const nftDetailsResponse = await retryFetch(
+              `https://api-mainnet.magiceden.dev/v2/tokens/${sale.tokenMint}`,
+              {},
+              2,  // Fewer retries for NFT details
+              800  // Shorter delay
+            );
+            
+            if (nftDetailsResponse.ok) {
+              const nftDetails = await nftDetailsResponse.json();
+              if (nftDetails && nftDetails.name) {
+                nftName = nftDetails.name;
+                imageUrl = nftDetails.image || '';
+              }
+            }
+          } catch (detailsError) {
+            log(`Could not fetch NFT details: ${detailsError instanceof Error ? detailsError.message : String(detailsError)}`, detailsError);
+            // Continue with the default values set above
+          }
+          
+          // Format NFT info with minimal info
+          const price = (sale.price || 0);
+          const buyerAddress = sale.buyer || 'Unknown';
+          
+          // Format buyer address for readability
+          const formatAddress = (address: string) => {
+            return address.length > 10 ? 
+              `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : 
+              address;
+          };
+
+          // Create a caption for the image with all details and links
+          const caption = `🌟 <b>New Sale Alert!</b> #${collectionSymbol}\n` +
+            `━━━━━━━━━━━━━━━\n` +
+            `🖼 <b>${nftName}</b>\n\n` +
+            `💎 <b>Price:</b> ${price.toFixed(3)} SOL\n` +
+            `👤 <b>Buyer:</b> <a href="https://solscan.io/account/${buyerAddress}">${formatAddress(buyerAddress)}</a>\n` +
+            `\n#NFT #Solana #${collectionSymbol.replace(/_/g, '')}`;
+          
+          // Create inline keyboard buttons for marketplaces
+          const inlineButtons = [
+            [
+              { text: '🏪 View on Magic Eden', url: `https://magiceden.io/item-details/${sale.tokenMint}` },
+              { text: '📊 View on Tensor', url: `https://tensor.trade/item/${sale.tokenMint}` }
+            ]
+          ];
+          
+          // Create a fallback message without HTML for error cases
+          const fallbackMessage = `New Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}`;
+          
+          // Send message and image with caption
+          log('Sending sale info');
+          try {
+            if (imageUrl) {
+              // Send image with caption containing all details and inline buttons
+              await safelySendImage(ctx, imageUrl, caption, fallbackMessage, inlineButtons);
+            } else {
+              // Skip if no image available
+              log('Skipping sale - no image available');
+            }
+            log('Message sent successfully');
+          } catch (messageError) {
+            log('Error sending sale message', messageError);
+          }
+          
+          // Add a small delay between messages to prevent rate limiting
+          log('Adding delay between messages');
+          await new Promise(resolve => setTimeout(resolve, 300));
+          log('Delay completed');
+          
+          processedCount++;
+        } catch (error) {
+          log('Error processing sale', error);
+          console.error('Error processing sale:', error);
+          // Continue with next sale
+        }
+      }
+
+      // Send completion message only if there were multiple images, which is unnecessary
+      log(`Completed processing ${processedCount} sales`);
+
+    } catch (error) {
+      log('Error in lastbuy command', error);
+      console.error('Error in lastbuy command:', error);
+      try {
+        await ctx.reply('❌ Failed to fetch recent sales. Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      } catch (replyError) {
+        log('Failed to send error message', replyError);
+      }
+    }
+
+  } catch (error) {
+    log('Error in lastbuy command', error);
+    console.error('Error in lastbuy command:', error);
+    try {
+      await ctx.reply('❌ Failed to fetch recent sales. Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } catch (replyError) {
+      log('Failed to send error message', replyError);
+    }
+  }
+});
+
+// Add callback handler for the alert button
+bot.action(/alert_(.+)/, async (ctx) => {
+  try {
+    const mintAddress = ctx.match[1];
+    
+    // Reply with instructions on how to set alert
+    await ctx.reply(
+      `To set a price alert for this NFT, please use the command:\n\n` +
+      `/alert ${mintAddress} [price_in_sol]\n\n` +
+      `Example: /alert ${mintAddress} 2.5`
+    );
+    
+    // Answer the callback query to remove loading state
+    await ctx.answerCbQuery();
+  } catch (error) {
+    console.error('Error handling alert callback:', error);
+    ctx.answerCbQuery('Error processing request');
+  }
 });
 
 // Start the bot
