@@ -594,6 +594,156 @@ async function safelySendImage(ctx: any, imageUrl: string, captionText: string, 
   }
 }
 
+const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
+  try {
+    const response = await retryFetch(
+      `https://api-mainnet.magiceden.dev/v2/collections/${collectionSymbol}/activities?offset=0&limit=${limit}&type=buyNow`,
+      {},
+      3,
+      1000
+    );
+
+    log(`API response status: ${response.status}`);
+
+    log('Parsing API response');
+    const activities = await response.json();
+    console.log(response.status, activities);
+
+    log(`Received ${activities?.length || 0} activities`);
+
+    if (!activities || !Array.isArray(activities)) {
+      log('Invalid response format', activities);
+      throw new Error('Invalid response format from Magic Eden API');
+    }
+
+    // Filter activities to only include buys from the last 5 minutes
+    const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
+    const fiveMinutesAgo = currentTime - 300; // 5 minutes = 300 seconds
+    const recentActivities = activities.filter(activity =>
+      activity.blockTime && activity.blockTime >= fiveMinutesAgo
+    );
+
+    log(`Filtered to ${recentActivities.length} activities from the last 5 minutes`);
+
+    if (recentActivities.length === 0) {
+      log('No activities found in the last 5 minutes');
+      return ctx.reply(`No sales found for "${collectionSymbol}" in the last 5 minutes on Magic Eden. This could mean:\n` +
+        `1. The collection symbol might be incorrect\n` +
+        `2. No sales have occurred recently\n` +
+        `3. The API might be having temporary issues\n\n` +
+        `Try again in a few moments or verify the collection symbol.`);
+    }
+
+    // Send a summary message first
+    log(`Found ${recentActivities.length} recent activities, sending details`);
+
+    // Process each sale with a timeout to avoid getting stuck
+    let processedCount = 0;
+    for (const sale of recentActivities.slice(0, limit)) {
+      try {
+        log(`Processing sale ${processedCount + 1}/${Math.min(limit, recentActivities.length)}`, {
+          tokenMint: sale.tokenMint,
+          price: sale.price,
+          buyer: sale.buyer?.substring(0, 10) + '...',
+          timestamp: sale.blockTime
+        });
+
+        // Get NFT details from Magic Eden with improved reliability
+        let nftName = `${collectionSymbol} #${sale.tokenMint?.substring(0, 6)}`;
+        let imageUrl = '';
+
+        try {
+          const nftDetailsResponse = await retryFetch(
+            `https://api-mainnet.magiceden.dev/v2/tokens/${sale.tokenMint}`,
+            {},
+            2,  // Fewer retries for NFT details
+            800  // Shorter delay
+          );
+
+          if (nftDetailsResponse.ok) {
+            const nftDetails = await nftDetailsResponse.json();
+            if (nftDetails && nftDetails.name) {
+              nftName = nftDetails.name;
+              imageUrl = nftDetails.image || '';
+            }
+          }
+        } catch (detailsError) {
+          log(`Could not fetch NFT details: ${detailsError instanceof Error ? detailsError.message : String(detailsError)}`, detailsError);
+          // Continue with the default values set above
+        }
+
+        // Format NFT info with minimal info
+        const price = (sale.price || 0);
+        const buyerAddress = sale.buyer || 'Unknown';
+
+        // Format buyer address for readability
+        const formatAddress = (address: string) => {
+          return address.length > 10 ?
+            `${address.substring(0, 6)}...${address.substring(address.length - 4)}` :
+            address;
+        };
+
+        // Create a caption for the image with all details and links
+        const caption = `🌟 <b>New Sale Alert!</b> #${collectionSymbol}\n` +
+          `━━━━━━━━━━━━━━━\n` +
+          `🖼 <b>${nftName}</b>\n\n` +
+          `💎 <b>Price:</b> ${price.toFixed(3)} SOL\n` +
+          `👤 <b>Buyer:</b> <a href="https://solscan.io/account/${buyerAddress}">${formatAddress(buyerAddress)}</a>\n` +
+          `\n#NFT #Solana #${collectionSymbol.replace(/_/g, '')}`;
+
+        // Create inline keyboard buttons for marketplaces
+        const inlineButtons = [
+          [
+            { text: '🏪 View on Magic Eden', url: `https://magiceden.io/item-details/${sale.tokenMint}` },
+            { text: '📊 View on Tensor', url: `https://tensor.trade/item/${sale.tokenMint}` }
+          ]
+        ];
+
+        // Create a fallback message without HTML for error cases
+        const fallbackMessage = `New Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}`;
+
+        // Send message and image with caption
+        log('Sending sale info');
+        try {
+          if (imageUrl) {
+            // Send image with caption containing all details and inline buttons
+            await safelySendImage(ctx, imageUrl, caption, fallbackMessage, inlineButtons);
+          } else {
+            // Skip if no image available
+            log('Skipping sale - no image available');
+          }
+          log('Message sent successfully');
+        } catch (messageError) {
+          log('Error sending sale message', messageError);
+        }
+
+        // Add a small delay between messages to prevent rate limiting
+        log('Adding delay between messages');
+        await new Promise(resolve => setTimeout(resolve, 300));
+        log('Delay completed');
+
+        processedCount++;
+      } catch (error) {
+        log('Error processing sale', error);
+        console.error('Error processing sale:', error);
+        // Continue with next sale
+      }
+    }
+
+    // Send completion message only if there were multiple images, which is unnecessary
+    log(`Completed processing ${processedCount} sales`);
+
+  } catch (error) {
+    log('Error in lastbuy command', error);
+    console.error('Error in lastbuy command:', error);
+    try {
+      await ctx.reply('❌ Failed to fetch recent sales. Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } catch (replyError) {
+      log('Failed to send error message', replyError);
+    }
+  }
+}
+
 // Update lastbuy command
 bot.command('lastbuy', async (ctx) => {
   try {
@@ -615,143 +765,7 @@ bot.command('lastbuy', async (ctx) => {
 
     // Use Magic Eden API for recent activities
     log('Making API request to Magic Eden');
-    try {
-      const response = await retryFetch(
-        `https://api-mainnet.magiceden.dev/v2/collections/${collectionSymbol}/activities?offset=0&limit=${limit}&type=buyNow`,
-        {},
-        3,
-        1000
-      );
-
-      log(`API response status: ${response.status}`);
-
-      log('Parsing API response');
-      const activities = await response.json();
-
-      log(`Received ${activities?.length || 0} activities`);
-
-      if (!activities || !Array.isArray(activities)) {
-        log('Invalid response format', activities);
-        throw new Error('Invalid response format from Magic Eden API');
-      }
-
-      if (activities.length === 0) {
-        log('No activities found');
-        return ctx.reply(`No recent sales found for collection "${collectionSymbol}" on Magic Eden. This could mean:\n` +
-          `1. The collection symbol might be incorrect\n` +
-          `2. No recent sales have occurred\n` +
-          `3. The API might be having temporary issues\n\n` +
-          `Try again in a few moments or verify the collection symbol.`);
-      }
-
-      // Send a summary message first
-      log(`Found ${activities.length} activities, sending details`);
-
-      // Process each sale with a timeout to avoid getting stuck
-      let processedCount = 0;
-      for (const sale of activities.slice(0, limit)) {
-        try {
-          log(`Processing sale ${processedCount + 1}/${Math.min(limit, activities.length)}`, {
-            tokenMint: sale.tokenMint,
-            price: sale.price,
-            buyer: sale.buyer?.substring(0, 10) + '...',
-            timestamp: sale.createdAt
-          });
-
-          // Get NFT details from Magic Eden with improved reliability
-          let nftName = `${collectionSymbol} #${sale.tokenMint?.substring(0, 6)}`;
-          let imageUrl = '';
-
-          try {
-            const nftDetailsResponse = await retryFetch(
-              `https://api-mainnet.magiceden.dev/v2/tokens/${sale.tokenMint}`,
-              {},
-              2,  // Fewer retries for NFT details
-              800  // Shorter delay
-            );
-
-            if (nftDetailsResponse.ok) {
-              const nftDetails = await nftDetailsResponse.json();
-              if (nftDetails && nftDetails.name) {
-                nftName = nftDetails.name;
-                imageUrl = nftDetails.image || '';
-              }
-            }
-          } catch (detailsError) {
-            log(`Could not fetch NFT details: ${detailsError instanceof Error ? detailsError.message : String(detailsError)}`, detailsError);
-            // Continue with the default values set above
-          }
-
-          // Format NFT info with minimal info
-          const price = (sale.price || 0);
-          const buyerAddress = sale.buyer || 'Unknown';
-
-          // Format buyer address for readability
-          const formatAddress = (address: string) => {
-            return address.length > 10 ?
-              `${address.substring(0, 6)}...${address.substring(address.length - 4)}` :
-              address;
-          };
-
-          // Create a caption for the image with all details and links
-          const caption = `🌟 <b>New Sale Alert!</b> #${collectionSymbol}\n` +
-            `━━━━━━━━━━━━━━━\n` +
-            `🖼 <b>${nftName}</b>\n\n` +
-            `💎 <b>Price:</b> ${price.toFixed(3)} SOL\n` +
-            `👤 <b>Buyer:</b> <a href="https://solscan.io/account/${buyerAddress}">${formatAddress(buyerAddress)}</a>\n` +
-            `\n#NFT #Solana #${collectionSymbol.replace(/_/g, '')}`;
-
-          // Create inline keyboard buttons for marketplaces
-          const inlineButtons = [
-            [
-              { text: '🏪 View on Magic Eden', url: `https://magiceden.io/item-details/${sale.tokenMint}` },
-              { text: '📊 View on Tensor', url: `https://tensor.trade/item/${sale.tokenMint}` }
-            ]
-          ];
-
-          // Create a fallback message without HTML for error cases
-          const fallbackMessage = `New Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}`;
-
-          // Send message and image with caption
-          log('Sending sale info');
-          try {
-            if (imageUrl) {
-              // Send image with caption containing all details and inline buttons
-              await safelySendImage(ctx, imageUrl, caption, fallbackMessage, inlineButtons);
-            } else {
-              // Skip if no image available
-              log('Skipping sale - no image available');
-            }
-            log('Message sent successfully');
-          } catch (messageError) {
-            log('Error sending sale message', messageError);
-          }
-
-          // Add a small delay between messages to prevent rate limiting
-          log('Adding delay between messages');
-          await new Promise(resolve => setTimeout(resolve, 300));
-          log('Delay completed');
-
-          processedCount++;
-        } catch (error) {
-          log('Error processing sale', error);
-          console.error('Error processing sale:', error);
-          // Continue with next sale
-        }
-      }
-
-      // Send completion message only if there were multiple images, which is unnecessary
-      log(`Completed processing ${processedCount} sales`);
-
-    } catch (error) {
-      log('Error in lastbuy command', error);
-      console.error('Error in lastbuy command:', error);
-      try {
-        await ctx.reply('❌ Failed to fetch recent sales. Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
-      } catch (replyError) {
-        log('Failed to send error message', replyError);
-      }
-    }
+    lastBuy(collectionSymbol, limit, ctx);
 
   } catch (error) {
     log('Error in lastbuy command', error);
@@ -783,6 +797,51 @@ bot.action(/alert_(.+)/, async (ctx) => {
     ctx.answerCbQuery('Error processing request');
   }
 });
+
+// Live buy subscriptions
+interface LiveBuySubscription {
+  chatId: number;
+  collectionSymbol: string;
+}
+
+const liveBuySubscriptions: LiveBuySubscription[] = [];
+const lastSaleTimestamps: { [collectionSymbol: string]: number } = {};
+
+function getLiveBuySubscribers(collectionSymbol: string): number[] {
+  return liveBuySubscriptions
+    .filter(sub => sub.collectionSymbol === collectionSymbol)
+    .map(sub => sub.chatId);
+}
+
+bot.command('livebuy', async (ctx) => {
+  const collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
+  if (liveBuySubscriptions.some(sub => sub.chatId === ctx.chat!.id && sub.collectionSymbol === collectionSymbol)) {
+    return ctx.reply(`You are already subscribed to live buy notifications for ${collectionSymbol}.`);
+  }
+  liveBuySubscriptions.push({ chatId: ctx.chat!.id, collectionSymbol });
+  ctx.reply(`✅ You will now receive live buy notifications for ${collectionSymbol}. Use /stoplivebuy ${collectionSymbol} to unsubscribe.`);
+});
+
+bot.command('stoplivebuy', async (ctx) => {
+  const collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
+  const index = liveBuySubscriptions.findIndex(
+    sub => sub.chatId === ctx.chat!.id && sub.collectionSymbol === collectionSymbol
+  );
+  if (index === -1) {
+    return ctx.reply(`You are not subscribed to live buy notifications for ${collectionSymbol}.`);
+  }
+  liveBuySubscriptions.splice(index, 1);
+  ctx.reply(`✅ Stopped live buy notifications for ${collectionSymbol}.`);
+});
+
+
+
+
+setInterval(
+  async () => {
+    lastBuy('trench_demons', 1, bot.telegram.sendMessage.bind(bot.telegram, process.env.CHAT_ID || ''));
+  }
+  , 3000);
 
 // Start the bot
 bot.launch();
