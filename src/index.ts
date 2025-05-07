@@ -1,7 +1,7 @@
 import { Telegraf, Markup } from 'telegraf';
 import * as dotenv from 'dotenv';
 import process from 'process';
-import express, { Request, Response } from 'express';
+import { startServer } from './server';
 
 dotenv.config();
 
@@ -783,15 +783,12 @@ bot.action(/alert_(.+)/, async (ctx) => {
     ctx.answerCbQuery('Error processing request');
   }
 });
-const app = express();
-const port = Number(process.env.PORT) || 10000;
 
-app.get('/', (_req: any, res: any) => res.send('Bot is running'));
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
 // Start the bot
 bot.launch();
+
+// Start the Express server
+startServer();
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
