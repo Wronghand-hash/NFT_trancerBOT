@@ -625,21 +625,17 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
 
     log(`Filtered to ${recentActivities.length} activities from the last 5 minutes`);
 
-    if (recentActivities.length === 0) {
+    if (activities.length === 0) {
       log('No activities found in the last 5 minutes');
-      return ctx.reply(`No sales found for "${collectionSymbol}" in the last 5 minutes on Magic Eden. This could mean:\n` +
-        `1. The collection symbol might be incorrect\n` +
-        `2. No sales have occurred recently\n` +
-        `3. The API might be having temporary issues\n\n` +
-        `Try again in a few moments or verify the collection symbol.`);
+
     }
 
     // Send a summary message first
-    log(`Found ${recentActivities.length} recent activities, sending details`);
+    log(`Found ${activities.length} recent activities, sending details`);
 
     // Process each sale with a timeout to avoid getting stuck
     let processedCount = 0;
-    for (const sale of recentActivities.slice(0, limit)) {
+    for (const sale of activities.slice(0, limit)) {
       try {
         log(`Processing sale ${processedCount + 1}/${Math.min(limit, recentActivities.length)}`, {
           tokenMint: sale.tokenMint,
@@ -837,11 +833,11 @@ bot.command('stoplivebuy', async (ctx) => {
 
 
 
-setInterval(
-  async () => {
-    lastBuy('trench_demons', 1, bot.telegram.sendMessage.bind(bot.telegram, process.env.CHAT_ID || ''));
-  }
-  , 3000);
+// setInterval(
+//   async () => {
+//     lastBuy('trench_demons', 1, bot.telegram.sendMessage.bind(bot.telegram, process.env.CHAT_ID || ''));
+//   }
+//   , 3000);
 
 // Start the bot
 bot.launch();
