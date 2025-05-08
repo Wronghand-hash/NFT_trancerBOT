@@ -1,6 +1,6 @@
 import express from 'express';
 import path from 'path';
-import { bot } from './index';
+// import { bot } from './index';
 
 const app = express();
 const port = Number(process.env.PORT) || 10000;
@@ -10,7 +10,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // Status page
 app.get('/', (_req: any, res: any) => {
-    const botStatus = bot.telegram ? '🟢 Running' : '🔴 Not Running';
+    // const botStatus = bot.telegram ? '🟢 Running' : '🔴 Not Running';
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -41,7 +41,6 @@ app.get('/', (_req: any, res: any) => {
         </head>
         <body>
             <h1>NFT Tracker Bot</h1>
-            <p>Status: <span class="status ${bot.telegram ? '' : 'error'}">${botStatus}</span></p>
             <div class="commands">
                 <h2>Available Commands:</h2>
                 <ul>
