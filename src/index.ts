@@ -626,14 +626,14 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
       throw new Error('Invalid response format from Magic Eden API');
     }
 
-    // Filter activities to only include buys from the last 5 minutes
+    // Filter activities to only include buys from the last 2 minutes
     const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-    const fiveMinutesAgo = currentTime - 300; // 5 minutes = 300 seconds
+    const twoMinutesAgo = currentTime - 120; // 2 minutes = 120 seconds
     const recentActivities = activities.filter(activity =>
-      activity.blockTime && activity.blockTime >= fiveMinutesAgo
+      activity.blockTime && activity.blockTime >= twoMinutesAgo
     );
 
-    log(`Filtered to ${recentActivities.length} activities from the last 5 minutes`);
+    log(`Filtered to ${recentActivities.length} activities from the last 2 minutes`);
     if (recentActivities.length > 0) {
       recentActivities.forEach((activity, index) => {
         log(`Recent Activity ${index + 1}:`, {
@@ -645,7 +645,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
     }
 
     if (recentActivities.length === 0) {
-      log('No activities found in the last 5 minutes');
+      log('No activities found in the last 2 minutes');
       return;
     }
 
@@ -838,8 +838,8 @@ bot.launch()
     process.exit(1);
   });
 
-// Replace the interval with cron service
-cron.schedule('*/5 * * * *', async () => {
+// Update cron schedule to run every 2 minutes
+cron.schedule('*/2 * * * *', async () => {
   try {
     const chatId = -1002611869947;
     log(`[Cron] Running scheduled check for new buys`);
