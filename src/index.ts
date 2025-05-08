@@ -548,18 +548,35 @@ async function safelySendImage(ctx: any, imageUrl: string, captionText: string, 
 
     // 1. Try sending as photo with caption
     try {
-      await withTimeout(
-        ctx.replyWithPhoto(
-          { url: imageUrl },
-          {
-            caption: captionText,
-            parse_mode: 'HTML',
-            reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
-          }
-        ),
-        15000, // Longer timeout for image loading
-        'Image send timed out'
-      );
+      if (typeof ctx === 'function') {
+        // Direct telegram send
+        await withTimeout(
+          ctx(
+            { url: imageUrl },
+            {
+              caption: captionText,
+              parse_mode: 'HTML',
+              reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
+            }
+          ),
+          15000,
+          'Image send timed out'
+        );
+      } else {
+        // Context object send
+        await withTimeout(
+          ctx.replyWithPhoto(
+            { url: imageUrl },
+            {
+              caption: captionText,
+              parse_mode: 'HTML',
+              reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
+            }
+          ),
+          15000,
+          'Image send timed out'
+        );
+      }
       log('Image with caption sent successfully');
       return true;
     } catch (error) {
@@ -568,24 +585,42 @@ async function safelySendImage(ctx: any, imageUrl: string, captionText: string, 
       // 2. Try with a different approach - send preview using a direct link with caption
       try {
         const previewText = `<a href="${imageUrl}">🖼</a> ${captionText}`;
-        await withTimeout(
-          ctx.reply(previewText, {
-            parse_mode: 'HTML',
-            disable_web_page_preview: false,
-            reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
-          }),
-          10000, // Increased timeout for URL preview
-          'Image URL send timed out'
-        );
+        if (typeof ctx === 'function') {
+          await withTimeout(
+            ctx(previewText, {
+              parse_mode: 'HTML',
+              disable_web_page_preview: false,
+              reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
+            }),
+            10000,
+            'Image URL send timed out'
+          );
+        } else {
+          await withTimeout(
+            ctx.reply(previewText, {
+              parse_mode: 'HTML',
+              disable_web_page_preview: false,
+              reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
+            }),
+            10000,
+            'Image URL send timed out'
+          );
+        }
         log('Image URL with caption sent successfully');
         return true;
       } catch (secondError) {
         log('All image sending methods failed', secondError);
 
         // 3. Send text fallback
-        await ctx.reply(fallbackMessage || captionText, {
-          reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
-        });
+        if (typeof ctx === 'function') {
+          await ctx(fallbackMessage || captionText, {
+            reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
+          });
+        } else {
+          await ctx.reply(fallbackMessage || captionText, {
+            reply_markup: inlineButtons ? { inline_keyboard: inlineButtons } : undefined
+          });
+        }
         return false;
       }
     }
@@ -626,14 +661,14 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
       throw new Error('Invalid response format from Magic Eden API');
     }
 
-    // Filter activities to only include buys from the last 30 minutes
+    // Filter activities to only include buys from the last 50 minutes
     const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-    const thirtyMinutesAgo = currentTime - 1800; // 30 minutes = 1800 seconds
+    const fiftyMinutesAgo = currentTime - 3000; // 50 minutes = 3000 seconds
     const recentActivities = activities.filter(activity =>
-      activity.blockTime && activity.blockTime >= thirtyMinutesAgo
+      activity.blockTime && activity.blockTime >= fiftyMinutesAgo
     );
 
-    log(`Filtered to ${recentActivities.length} activities from the last 30 minutes`);
+    log(`Filtered to ${recentActivities.length} activities from the last 50 minutes`);
     if (recentActivities.length > 0) {
       recentActivities.forEach((activity, index) => {
         log(`Recent Activity ${index + 1}:`, {
@@ -645,7 +680,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
     }
 
     if (recentActivities.length === 0) {
-      log('No activities found in the last 30 minutes');
+      log('No activities found in the last 50 minutes');
       return;
     }
 
@@ -680,11 +715,11 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
             if (nftDetails && nftDetails.name) {
               nftName = nftDetails.name;
               imageUrl = nftDetails.image || '';
-              log('Found NFT image URL:', imageUrl);
             }
           }
         } catch (detailsError) {
           log(`Could not fetch NFT details: ${detailsError instanceof Error ? detailsError.message : String(detailsError)}`, detailsError);
+          // Continue with the default values set above
         }
 
         // Format NFT info with minimal info
@@ -706,6 +741,13 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
           `👤 <b>Buyer:</b> <a href="https://solscan.io/account/${buyerAddress}">${formatAddress(buyerAddress)}</a>\n` +
           `\n#NFT #Solana #${collectionSymbol.replace(/_/g, '')}`;
 
+        log('Generated message text:', {
+          caption,
+          nftName,
+          price,
+          buyerAddress
+        });
+
         // Create inline keyboard buttons for marketplaces
         const inlineButtons = [
           [
@@ -717,46 +759,17 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
         // Create a fallback message without HTML for error cases
         const fallbackMessage = `New Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}`;
 
+        log('Generated fallback message:', fallbackMessage);
+
         // Send message and image with caption
         log('Sending sale info');
         try {
           if (imageUrl) {
-            log('Attempting to send image with URL:', imageUrl);
-            // Try sending as photo first
-            try {
-              await ctx.replyWithPhoto(
-                { url: imageUrl },
-                {
-                  caption: caption,
-                  parse_mode: 'HTML',
-                  reply_markup: { inline_keyboard: inlineButtons }
-                }
-              );
-              log('Image sent successfully');
-            } catch (photoError) {
-              log('Failed to send as photo, trying alternative method:', photoError);
-              // If photo fails, try sending as document
-              try {
-                await ctx.replyWithDocument(
-                  { url: imageUrl },
-                  {
-                    caption: caption,
-                    parse_mode: 'HTML',
-                    reply_markup: { inline_keyboard: inlineButtons }
-                  }
-                );
-                log('Image sent as document successfully');
-              } catch (documentError) {
-                log('Failed to send as document, falling back to text:', documentError);
-                // If both fail, send text message
-                await ctx.reply(fallbackMessage, {
-                  parse_mode: 'HTML',
-                  reply_markup: { inline_keyboard: inlineButtons }
-                });
-              }
-            }
+            // Send image with caption containing all details and inline buttons
+            await safelySendImage(ctx, imageUrl, caption, fallbackMessage, inlineButtons);
           } else {
-            log('No image URL available, sending text message');
+            // Send text message if no image available
+            log('No image available, sending text message');
             await ctx.reply(fallbackMessage, {
               parse_mode: 'HTML',
               reply_markup: { inline_keyboard: inlineButtons }
@@ -764,7 +777,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
           }
           log('Message sent successfully');
         } catch (messageError) {
-          log('Error sending sale message:', messageError);
+          log('Error sending sale message', messageError);
         }
 
         // Add a small delay between messages to prevent rate limiting
@@ -865,16 +878,7 @@ cron.schedule('*/2 * * * *', async () => {
   try {
     const chatId = -1002611869947;
     log(`[Cron] Running scheduled check for new buys`);
-    await lastBuy('trench_demons', 5, {
-      reply: async (text: string, options?: any) => {
-        try {
-          await bot.telegram.sendMessage(chatId, text, options);
-          log('[Cron] Message sent successfully to group chat');
-        } catch (error) {
-          log('[Cron] Error sending message to group chat:', error);
-        }
-      }
-    });
+    await lastBuy('trench_demons', 5, bot.telegram.sendPhoto.bind(bot.telegram, chatId));
   } catch (error) {
     log('[Cron] Error in scheduled execution:', error);
   }
