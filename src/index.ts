@@ -705,6 +705,13 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
           `👤 <b>Buyer:</b> <a href="https://solscan.io/account/${buyerAddress}">${formatAddress(buyerAddress)}</a>\n` +
           `\n#NFT #Solana #${collectionSymbol.replace(/_/g, '')}`;
 
+        log('Generated message text:', {
+          caption,
+          nftName,
+          price,
+          buyerAddress
+        });
+
         // Create inline keyboard buttons for marketplaces
         const inlineButtons = [
           [
@@ -716,6 +723,8 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
         // Create a fallback message without HTML for error cases
         const fallbackMessage = `New Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}`;
 
+        log('Generated fallback message:', fallbackMessage);
+
         // Send message and image with caption
         log('Sending sale info');
         try {
@@ -723,8 +732,12 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
             // Send image with caption containing all details and inline buttons
             await safelySendImage(ctx, imageUrl, caption, fallbackMessage, inlineButtons);
           } else {
-            // Skip if no image available
-            log('Skipping sale - no image available');
+            // Send text message if no image available
+            log('No image available, sending text message');
+            await ctx.reply(fallbackMessage, {
+              parse_mode: 'HTML',
+              reply_markup: { inline_keyboard: inlineButtons }
+            });
           }
           log('Message sent successfully');
         } catch (messageError) {
@@ -824,12 +837,28 @@ bot.launch()
     process.exit(1);
   });
 
-
+// Update the interval at the bottom of the file
 setInterval(
   async () => {
-    lastBuy('trench_demons', 5, bot.telegram.sendMessage.bind(bot.telegram, -1002611869947));
+    try {
+      const chatId = -1002611869947;
+      log(`Attempting to send message to chat ID: ${chatId}`);
+      await lastBuy('trench_demons', 5, {
+        reply: async (text: string, options?: any) => {
+          try {
+            await bot.telegram.sendMessage(chatId, text, options);
+            log('Message sent successfully to group chat');
+          } catch (error) {
+            log('Error sending message to group chat:', error);
+          }
+        }
+      });
+    } catch (error) {
+      log('Error in interval execution:', error);
+    }
   }
   , 30000);
+
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
