@@ -607,27 +607,45 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
 
     log('Parsing API response');
     const activities = await response.json();
-    console.log(response.status, activities);
-
-    log(`Received ${activities?.length || 0} activities`);
+    
+    // Add detailed logging of activities
+    log(`Raw activities received: ${activities?.length || 0}`);
+    if (activities && Array.isArray(activities)) {
+      activities.forEach((activity, index) => {
+        log(`Activity ${index + 1}:`, {
+          blockTime: activity.blockTime,
+          price: activity.price,
+          tokenMint: activity.tokenMint?.substring(0, 8) + '...'
+        });
+      });
+    }
 
     if (!activities || !Array.isArray(activities)) {
       log('Invalid response format', activities);
       throw new Error('Invalid response format from Magic Eden API');
     }
 
-    // Filter activities to only include buys from the last 5 minutes
+    // Filter activities to only include buys from the last 10 minutes
     const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-    const fiveMinutesAgo = currentTime - 30000; // 5 minutes = 300 seconds
+    const tenMinutesAgo = currentTime - 600; // 10 minutes = 600 seconds
     const recentActivities = activities.filter(activity =>
-      activity.blockTime && activity.blockTime >= fiveMinutesAgo
+      activity.blockTime && activity.blockTime >= tenMinutesAgo
     );
 
-    log(`Filtered to ${recentActivities.length} activities from the last 5 minutes`);
+    log(`Filtered to ${recentActivities.length} activities from the last 10 minutes`);
+    if (recentActivities.length > 0) {
+      recentActivities.forEach((activity, index) => {
+        log(`Recent Activity ${index + 1}:`, {
+          blockTime: activity.blockTime,
+          price: activity.price,
+          tokenMint: activity.tokenMint?.substring(0, 8) + '...'
+        });
+      });
+    }
 
     if (recentActivities.length === 0) {
-      log('No activities found in the last 5 minutes');
-
+      log('No activities found in the last 10 minutes');
+      return;
     }
 
     // Send a summary message first
@@ -809,7 +827,7 @@ bot.launch()
 
 setInterval(
   async () => {
-    lastBuy('trench_demons', 1, bot.telegram.sendMessage.bind(bot.telegram, process.env.CHAT_ID || ''));
+    lastBuy('trench_demons', 5, bot.telegram.sendMessage.bind(bot.telegram, -1002611869947));
   }
   , 30000);
 // Enable graceful stop
