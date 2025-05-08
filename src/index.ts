@@ -2,6 +2,7 @@ import { Telegraf, Markup } from 'telegraf';
 import * as dotenv from 'dotenv';
 import process from 'process';
 import { startServer } from './server';
+import * as cron from 'node-cron';
 
 dotenv.config();
 
@@ -837,30 +838,36 @@ bot.launch()
     process.exit(1);
   });
 
-// Update the interval at the bottom of the file
-setInterval(
-  async () => {
-    try {
-      const chatId = -1002611869947;
-      log(`Attempting to send message to chat ID: ${chatId}`);
-      await lastBuy('trench_demons', 5, {
-        reply: async (text: string, options?: any) => {
-          try {
-            await bot.telegram.sendMessage(chatId, text, options);
-            log('Message sent successfully to group chat');
-          } catch (error) {
-            log('Error sending message to group chat:', error);
-          }
+// Replace the interval with cron service
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const chatId = -1002611869947;
+    log(`[Cron] Running scheduled check for new buys`);
+    await lastBuy('trench_demons', 5, {
+      reply: async (text: string, options?: any) => {
+        try {
+          await bot.telegram.sendMessage(chatId, text, options);
+          log('[Cron] Message sent successfully to group chat');
+        } catch (error) {
+          log('[Cron] Error sending message to group chat:', error);
         }
-      });
-    } catch (error) {
-      log('Error in interval execution:', error);
-    }
+      }
+    });
+  } catch (error) {
+    log('[Cron] Error in scheduled execution:', error);
   }
-  , 5 * 60 * 1000); // Run every 5 minutes (5 * 60 * 1000 milliseconds)
+});
 
 // Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => {
+  log('Stopping bot and cron jobs...');
+  bot.stop('SIGINT');
+  process.exit(0);
+});
+process.once('SIGTERM', () => {
+  log('Stopping bot and cron jobs...');
+  bot.stop('SIGTERM');
+  process.exit(0);
+});
 
 export { bot };
