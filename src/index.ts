@@ -626,14 +626,14 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
       throw new Error('Invalid response format from Magic Eden API');
     }
 
-    // Filter activities to only include buys from the last 2 minutes
+    // Filter activities to only include buys from the last 15 minutes
     const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-    const twoMinutesAgo = currentTime - 120; // 2 minutes = 120 seconds
+    const fifteenMinutesAgo = currentTime - 900; // 15 minutes = 900 seconds
     const recentActivities = activities.filter(activity =>
-      activity.blockTime && activity.blockTime >= twoMinutesAgo
+      activity.blockTime && activity.blockTime >= fifteenMinutesAgo
     );
 
-    log(`Filtered to ${recentActivities.length} activities from the last 2 minutes`);
+    log(`Filtered to ${recentActivities.length} activities from the last 15 minutes`);
     if (recentActivities.length > 0) {
       recentActivities.forEach((activity, index) => {
         log(`Recent Activity ${index + 1}:`, {
@@ -645,7 +645,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
     }
 
     if (recentActivities.length === 0) {
-      log('No activities found in the last 2 minutes');
+      log('No activities found in the last 15 minutes');
       return;
     }
 
