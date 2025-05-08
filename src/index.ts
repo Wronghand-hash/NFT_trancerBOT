@@ -625,17 +625,17 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
 
     log(`Filtered to ${recentActivities.length} activities from the last 5 minutes`);
 
-    if (activities.length === 0) {
+    if (recentActivities.length === 0) {
       log('No activities found in the last 5 minutes');
 
     }
 
     // Send a summary message first
-    log(`Found ${activities.length} recent activities, sending details`);
+    log(`Found ${recentActivities.length} recent activities, sending details`);
 
     // Process each sale with a timeout to avoid getting stuck
     let processedCount = 0;
-    for (const sale of activities.slice(0, limit)) {
+    for (const sale of recentActivities.slice(0, limit)) {
       try {
         log(`Processing sale ${processedCount + 1}/${Math.min(limit, recentActivities.length)}`, {
           tokenMint: sale.tokenMint,
@@ -806,6 +806,12 @@ bot.launch()
     process.exit(1);
   });
 
+
+setInterval(
+  async () => {
+    lastBuy('trench_demons', 1, bot.telegram.sendMessage.bind(bot.telegram, process.env.CHAT_ID || ''));
+  }
+  , 3000);
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
