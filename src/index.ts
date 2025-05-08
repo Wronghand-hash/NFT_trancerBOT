@@ -618,7 +618,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
 
     // Filter activities to only include buys from the last 5 minutes
     const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-    const fiveMinutesAgo = currentTime - 300; // 5 minutes = 300 seconds
+    const fiveMinutesAgo = currentTime - 30000; // 5 minutes = 300 seconds
     const recentActivities = activities.filter(activity =>
       activity.blockTime && activity.blockTime >= fiveMinutesAgo
     );
