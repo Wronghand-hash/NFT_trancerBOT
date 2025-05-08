@@ -863,10 +863,16 @@ bot.action(/alert_(.+)/, async (ctx) => {
 
 // Launch bot
 bot.launch()
-  .then(() => {
+  .then(async () => {
     console.log('Bot started successfully');
-    // Start the server after bot is launched
-    startServer();
+    try {
+      // Start the server after bot is launched
+      await startServer();
+      console.log('Server started successfully');
+    } catch (error) {
+      console.error('Failed to start server:', error);
+      // Don't exit process, let the bot continue running
+    }
   })
   .catch((err) => {
     console.error('Failed to start bot:', err);
@@ -890,10 +896,23 @@ process.once('SIGINT', () => {
   bot.stop('SIGINT');
   process.exit(0);
 });
+
 process.once('SIGTERM', () => {
   log('Stopping bot and cron jobs...');
   bot.stop('SIGTERM');
   process.exit(0);
+});
+
+// Add uncaught exception handler
+process.on('uncaughtException', (error) => {
+  log('Uncaught Exception:', error);
+  // Don't exit process, let the bot continue running
+});
+
+// Add unhandled rejection handler
+process.on('unhandledRejection', (reason) => {
+  log('Unhandled Rejection:', reason);
+  // Don't exit process, let the bot continue running
 });
 
 export { bot };

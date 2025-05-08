@@ -3,9 +3,13 @@ import path from 'path';
 import { bot } from './index';
 
 const app = express();
-const port = Number(process.env.PORT) || 10000;
-const host = '0.0.0.0';
+// Use process.env.PORT for Render.com, fallback to 10000 for local development
+const port = process.env.PORT ? parseInt(process.env.PORT) : 10000;
+const host = '0.0.0.0'; // Listen on all network interfaces
 
+// Add basic middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/', (_req, res) => {
@@ -29,35 +33,49 @@ app.get('/', (_req, res) => {
 
 // Add health check endpoint
 app.get('/health', (_req, res) => {
-    res.status(200).json({ status: 'ok', bot: bot.telegram ? 'connected' : 'disconnected' });
+    res.status(200).json({ 
+        status: 'ok', 
+        bot: bot.telegram ? 'connected' : 'disconnected',
+        port: port,
+        environment: process.env.NODE_ENV || 'development'
+    });
 });
 
 export function startServer() {
     return new Promise((resolve, reject) => {
-        const server = app.listen(port, host, () => {
-            console.log(`Server running on http://${host}:${port}`);
-            resolve(server);
-        }).on('error', (err) => {
-            console.error('Server startup error:', err);
+        try {
+            const server = app.listen(port, host, () => {
+                console.log(`Server running on http://${host}:${port}`);
+                console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+                resolve(server);
+            });
+
+            // Handle server errors
+            server.on('error', (err: NodeJS.ErrnoException) => {
+                if (err.code === 'EADDRINUSE') {
+                    console.error(`Port ${port} is already in use`);
+                } else {
+                    console.error('Server error:', err);
+                }
+                reject(err);
+            });
+
+            // Handle graceful shutdown
+            const shutdown = () => {
+                console.log('Received shutdown signal. Starting graceful shutdown...');
+                server.close(() => {
+                    console.log('Server closed');
+                    process.exit(0);
+                });
+            };
+
+            process.on('SIGTERM', shutdown);
+            process.on('SIGINT', shutdown);
+
+        } catch (err) {
+            console.error('Failed to start server:', err);
             reject(err);
-        });
-
-        // Handle graceful shutdown
-        process.on('SIGTERM', () => {
-            console.log('SIGTERM received. Starting graceful shutdown...');
-            server.close(() => {
-                console.log('Server closed');
-                process.exit(0);
-            });
-        });
-
-        process.on('SIGINT', () => {
-            console.log('SIGINT received. Starting graceful shutdown...');
-            server.close(() => {
-                console.log('Server closed');
-                process.exit(0);
-            });
-        });
+        }
     });
 }
 
