@@ -811,7 +811,7 @@ setInterval(
   async () => {
     lastBuy('trench_demons', 1, bot.telegram.sendMessage.bind(bot.telegram, process.env.CHAT_ID || ''));
   }
-  , 3000);
+  , 30000);
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
