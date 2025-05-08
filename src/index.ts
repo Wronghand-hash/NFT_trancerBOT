@@ -625,14 +625,14 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
       throw new Error('Invalid response format from Magic Eden API');
     }
 
-    // Filter activities to only include buys from the last hour
+    // Filter activities to only include buys from the last 5 minutes
     const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-    const oneHourAgo = currentTime - 3600; // 1 hour = 3600 seconds
+    const fiveMinutesAgo = currentTime - 300; // 5 minutes = 300 seconds
     const recentActivities = activities.filter(activity =>
-      activity.blockTime && activity.blockTime >= oneHourAgo
+      activity.blockTime && activity.blockTime >= fiveMinutesAgo
     );
 
-    log(`Filtered to ${recentActivities.length} activities from the last hour`);
+    log(`Filtered to ${recentActivities.length} activities from the last 5 minutes`);
     if (recentActivities.length > 0) {
       recentActivities.forEach((activity, index) => {
         log(`Recent Activity ${index + 1}:`, {
@@ -644,7 +644,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
     }
 
     if (recentActivities.length === 0) {
-      log('No activities found in the last hour');
+      log('No activities found in the last 5 minutes');
       return;
     }
 
@@ -857,7 +857,7 @@ setInterval(
       log('Error in interval execution:', error);
     }
   }
-  , 30000);
+  , 5 * 60 * 1000); // Run every 5 minutes (5 * 60 * 1000 milliseconds)
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
