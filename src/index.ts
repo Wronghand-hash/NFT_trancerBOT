@@ -794,57 +794,20 @@ bot.action(/alert_(.+)/, async (ctx) => {
   }
 });
 
-// Live buy subscriptions
-interface LiveBuySubscription {
-  chatId: number;
-  collectionSymbol: string;
-}
-
-const liveBuySubscriptions: LiveBuySubscription[] = [];
-const lastSaleTimestamps: { [collectionSymbol: string]: number } = {};
-
-function getLiveBuySubscribers(collectionSymbol: string): number[] {
-  return liveBuySubscriptions
-    .filter(sub => sub.collectionSymbol === collectionSymbol)
-    .map(sub => sub.chatId);
-}
-
-bot.command('livebuy', async (ctx) => {
-  const collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
-  if (liveBuySubscriptions.some(sub => sub.chatId === ctx.chat!.id && sub.collectionSymbol === collectionSymbol)) {
-    return ctx.reply(`You are already subscribed to live buy notifications for ${collectionSymbol}.`);
-  }
-  liveBuySubscriptions.push({ chatId: ctx.chat!.id, collectionSymbol });
-  ctx.reply(`✅ You will now receive live buy notifications for ${collectionSymbol}. Use /stoplivebuy ${collectionSymbol} to unsubscribe.`);
-});
-
-bot.command('stoplivebuy', async (ctx) => {
-  const collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
-  const index = liveBuySubscriptions.findIndex(
-    sub => sub.chatId === ctx.chat!.id && sub.collectionSymbol === collectionSymbol
-  );
-  if (index === -1) {
-    return ctx.reply(`You are not subscribed to live buy notifications for ${collectionSymbol}.`);
-  }
-  liveBuySubscriptions.splice(index, 1);
-  ctx.reply(`✅ Stopped live buy notifications for ${collectionSymbol}.`);
-});
-
-
-
-
-// setInterval(
-//   async () => {
-//     lastBuy('trench_demons', 1, bot.telegram.sendMessage.bind(bot.telegram, process.env.CHAT_ID || ''));
-//   }
-//   , 3000);
-
-// Start the bot
-bot.launch();
-
-// Start the Express server
-startServer();
+// Launch bot
+bot.launch()
+  .then(() => {
+    console.log('Bot started successfully');
+    // Start the server after bot is launched
+    startServer();
+  })
+  .catch((err) => {
+    console.error('Failed to start bot:', err);
+    process.exit(1);
+  });
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+export { bot };
