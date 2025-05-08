@@ -680,11 +680,11 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
             if (nftDetails && nftDetails.name) {
               nftName = nftDetails.name;
               imageUrl = nftDetails.image || '';
+              log('Found NFT image URL:', imageUrl);
             }
           }
         } catch (detailsError) {
           log(`Could not fetch NFT details: ${detailsError instanceof Error ? detailsError.message : String(detailsError)}`, detailsError);
-          // Continue with the default values set above
         }
 
         // Format NFT info with minimal info
@@ -706,13 +706,6 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
           `👤 <b>Buyer:</b> <a href="https://solscan.io/account/${buyerAddress}">${formatAddress(buyerAddress)}</a>\n` +
           `\n#NFT #Solana #${collectionSymbol.replace(/_/g, '')}`;
 
-        log('Generated message text:', {
-          caption,
-          nftName,
-          price,
-          buyerAddress
-        });
-
         // Create inline keyboard buttons for marketplaces
         const inlineButtons = [
           [
@@ -724,17 +717,46 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
         // Create a fallback message without HTML for error cases
         const fallbackMessage = `New Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}`;
 
-        log('Generated fallback message:', fallbackMessage);
-
         // Send message and image with caption
         log('Sending sale info');
         try {
           if (imageUrl) {
-            // Send image with caption containing all details and inline buttons
-            await safelySendImage(ctx, imageUrl, caption, fallbackMessage, inlineButtons);
+            log('Attempting to send image with URL:', imageUrl);
+            // Try sending as photo first
+            try {
+              await ctx.replyWithPhoto(
+                { url: imageUrl },
+                {
+                  caption: caption,
+                  parse_mode: 'HTML',
+                  reply_markup: { inline_keyboard: inlineButtons }
+                }
+              );
+              log('Image sent successfully');
+            } catch (photoError) {
+              log('Failed to send as photo, trying alternative method:', photoError);
+              // If photo fails, try sending as document
+              try {
+                await ctx.replyWithDocument(
+                  { url: imageUrl },
+                  {
+                    caption: caption,
+                    parse_mode: 'HTML',
+                    reply_markup: { inline_keyboard: inlineButtons }
+                  }
+                );
+                log('Image sent as document successfully');
+              } catch (documentError) {
+                log('Failed to send as document, falling back to text:', documentError);
+                // If both fail, send text message
+                await ctx.reply(fallbackMessage, {
+                  parse_mode: 'HTML',
+                  reply_markup: { inline_keyboard: inlineButtons }
+                });
+              }
+            }
           } else {
-            // Send text message if no image available
-            log('No image available, sending text message');
+            log('No image URL available, sending text message');
             await ctx.reply(fallbackMessage, {
               parse_mode: 'HTML',
               reply_markup: { inline_keyboard: inlineButtons }
@@ -742,7 +764,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
           }
           log('Message sent successfully');
         } catch (messageError) {
-          log('Error sending sale message', messageError);
+          log('Error sending sale message:', messageError);
         }
 
         // Add a small delay between messages to prevent rate limiting
