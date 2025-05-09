@@ -632,6 +632,10 @@ async function safelySendImage(ctx: any, imageUrl: string, captionText: string, 
 
 const lastBuy = async (collectionSymbol: string, limit: number, ctx: any, filterByTime: boolean = true) => {
   try {
+    // Normalize collection symbol
+    collectionSymbol = collectionSymbol.toLowerCase().replace(/\s+/g, '_');
+    log(`Fetching activities for collection: ${collectionSymbol}`);
+
     const response = await retryFetch(
       `https://api-mainnet.magiceden.dev/v2/collections/${collectionSymbol}/activities?offset=0&limit=${limit}&type=buyNow`,
       {},
@@ -640,6 +644,12 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any, filter
     );
 
     log(`API response status: ${response.status}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      log(`API Error Response: ${errorText}`);
+      throw new Error(`API returned status ${response.status}: ${errorText}`);
+    }
 
     log('Parsing API response');
     const activities = await response.json();
@@ -654,10 +664,8 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any, filter
           tokenMint: activity.tokenMint?.substring(0, 8) + '...'
         });
       });
-    }
-
-    if (!activities || !Array.isArray(activities)) {
-      log('Invalid response format', activities);
+    } else {
+      log('Invalid activities format:', activities);
       throw new Error('Invalid response format from Magic Eden API');
     }
 
@@ -684,6 +692,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any, filter
 
     if (recentActivities.length === 0) {
       log('No activities found');
+      await ctx.reply(`No recent sales found for ${collectionSymbol}. Try checking the collection symbol or try again later.`);
       return;
     }
 
@@ -803,7 +812,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any, filter
     log('Error in lastbuy command', error);
     console.error('Error in lastbuy command:', error);
     try {
-      await ctx.reply('❌ Failed to fetch recent sales. Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      await ctx.reply(`❌ Failed to fetch recent sales for ${collectionSymbol}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } catch (replyError) {
       log('Failed to send error message', replyError);
     }
@@ -814,9 +823,11 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any, filter
 bot.command('lastbuy', async (ctx) => {
   try {
     log('Starting lastbuy command');
-    const collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
+    let collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
     const limit = 1; // Limit to 1 sale
 
+    // Normalize collection symbol
+    collectionSymbol = collectionSymbol.toLowerCase().replace(/\s+/g, '_');
     log(`Fetching sales for collection: ${collectionSymbol}, limit: ${limit}`);
 
     try {
@@ -831,13 +842,14 @@ bot.command('lastbuy', async (ctx) => {
 
     // Use Magic Eden API for recent activities, with filterByTime set to false for command
     log('Making API request to Magic Eden');
-    lastBuy(collectionSymbol, limit, ctx, false);
+    await lastBuy(collectionSymbol, limit, ctx, false);
 
   } catch (error) {
     log('Error in lastbuy command', error);
     console.error('Error in lastbuy command:', error);
     try {
-      await ctx.reply('❌ Failed to fetch recent sales. Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      const collectionSymbol = ctx.message.text.split(' ')[1] || 'trench_demons';
+      await ctx.reply(`❌ Failed to fetch recent sales for ${collectionSymbol}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } catch (replyError) {
       log('Failed to send error message', replyError);
     }
