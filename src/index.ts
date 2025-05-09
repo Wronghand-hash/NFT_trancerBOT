@@ -661,14 +661,14 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
       throw new Error('Invalid response format from Magic Eden API');
     }
 
-    // Filter activities to only include buys from the last 1 minute
+    // Filter activities to only include buys from the last 3 hours
     const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-    const oneMinuteAgo = currentTime - 60; // 1 minute = 60 seconds
+    const threeHoursAgo = currentTime - (3 * 60 * 60); // 3 hours = 3 * 60 * 60 seconds
     const recentActivities = activities.filter(activity =>
-      activity.blockTime && activity.blockTime >= oneMinuteAgo
+      activity.blockTime && activity.blockTime >= threeHoursAgo
     );
 
-    log(`Filtered to ${recentActivities.length} activities from the last 1 minute`);
+    log(`Filtered to ${recentActivities.length} activities from the last 3 hours`);
     if (recentActivities.length > 0) {
       recentActivities.forEach((activity, index) => {
         log(`Recent Activity ${index + 1}:`, {
@@ -680,7 +680,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
     }
 
     if (recentActivities.length === 0) {
-      log('No activities found in the last 1 minute');
+      log('No activities found in the last 3 hours');
       return;
     }
 
@@ -734,11 +734,12 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
         };
 
         // Create a caption for the image with all details and links
-        const caption = `🌟 <b>New Sale Alert!</b> #${collectionSymbol}\n` +
+        const caption = `🌟 <b>Recent Sale Alert!</b> #${collectionSymbol}\n` +
           `━━━━━━━━━━━━━━━\n` +
           `🖼 <b>${nftName}</b>\n\n` +
           `💎 <b>Price:</b> ${price.toFixed(3)} SOL\n` +
           `👤 <b>Buyer:</b> <a href="https://solscan.io/account/${buyerAddress}">${formatAddress(buyerAddress)}</a>\n` +
+          `⏰ <b>Time:</b> ${formatDate(sale.blockTime * 1000)}\n` +
           `\n#NFT #Solana #${collectionSymbol.replace(/_/g, '')}`;
 
         log('Generated message text:', {
@@ -757,7 +758,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
         ];
 
         // Create a fallback message without HTML for error cases
-        const fallbackMessage = `New Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}`;
+        const fallbackMessage = `Recent Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}\nTime: ${formatDate(sale.blockTime * 1000)}`;
 
         log('Generated fallback message:', fallbackMessage);
 
@@ -917,12 +918,12 @@ function startCronJob() {
     await keepAlive();
   });
 
-  // Start NFT tracking cron job (every minute)
-  cronJob = cron.schedule('* * * * *', async () => {
+  // Start NFT tracking cron job (every 5 minutes)
+  cronJob = cron.schedule('*/5 * * * *', async () => {
     try {
       const chatId = -1002611869947;
       log(`[Cron] Running scheduled check for new buys`);
-      await lastBuy('trench_demons', 5, bot.telegram.sendPhoto.bind(bot.telegram, chatId));
+      await lastBuy('trench_demons', 10, bot.telegram.sendPhoto.bind(bot.telegram, chatId));
     } catch (error) {
       log('[Cron] Error in scheduled execution:', error);
       // Attempt to restart the cron job if it fails
