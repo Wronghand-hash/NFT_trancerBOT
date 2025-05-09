@@ -630,7 +630,7 @@ async function safelySendImage(ctx: any, imageUrl: string, captionText: string, 
   }
 }
 
-const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
+const lastBuy = async (collectionSymbol: string, limit: number, ctx: any, filterByTime: boolean = true) => {
   try {
     const response = await retryFetch(
       `https://api-mainnet.magiceden.dev/v2/collections/${collectionSymbol}/activities?offset=0&limit=${limit}&type=buyNow`,
@@ -661,14 +661,17 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
       throw new Error('Invalid response format from Magic Eden API');
     }
 
-    // Filter activities to only include buys from the last 1 minute
-    const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-    const oneMinuteAgo = currentTime - 60; // 1 minute = 60 seconds
-    const recentActivities = activities.filter(activity =>
-      activity.blockTime && activity.blockTime >= oneMinuteAgo
-    );
+    // Only filter by time if filterByTime is true
+    let recentActivities = activities;
+    if (filterByTime) {
+      const currentTime = Math.floor(Date.now() / 1000);
+      const oneMinuteAgo = currentTime - 60;
+      recentActivities = activities.filter(activity =>
+        activity.blockTime && activity.blockTime >= oneMinuteAgo
+      );
+    }
 
-    log(`Filtered to ${recentActivities.length} activities from the last 1 minute`);
+    log(`Filtered to ${recentActivities.length} activities${filterByTime ? ' from the last 1 minute' : ''}`);
     if (recentActivities.length > 0) {
       recentActivities.forEach((activity, index) => {
         log(`Recent Activity ${index + 1}:`, {
@@ -680,7 +683,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
     }
 
     if (recentActivities.length === 0) {
-      log('No activities found in the last 1 minute');
+      log('No activities found');
       return;
     }
 
@@ -826,9 +829,9 @@ bot.command('lastbuy', async (ctx) => {
       log('Warning: Initial reply timed out, continuing anyway', replyError);
     }
 
-    // Use Magic Eden API for recent activities
+    // Use Magic Eden API for recent activities, with filterByTime set to false for command
     log('Making API request to Magic Eden');
-    lastBuy(collectionSymbol, limit, ctx);
+    lastBuy(collectionSymbol, limit, ctx, false);
 
   } catch (error) {
     log('Error in lastbuy command', error);
@@ -922,7 +925,7 @@ function startCronJob() {
     try {
       const chatId = -1002611869947;
       log(`[Cron] Running scheduled check for new buys`);
-      await lastBuy('trench_demons', 5, bot.telegram.sendPhoto.bind(bot.telegram, chatId));
+      await lastBuy('trench_demons', 5, bot.telegram.sendPhoto.bind(bot.telegram, chatId), true);
     } catch (error) {
       log('[Cron] Error in scheduled execution:', error);
       // Attempt to restart the cron job if it fails
