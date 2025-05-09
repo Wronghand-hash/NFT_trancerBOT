@@ -1,6 +1,8 @@
 import express from 'express';
 import path from 'path';
 import { bot } from './index';
+import fetch from 'node-fetch';
+import * as cron from 'node-cron';
 
 const app = express();
 // Use process.env.PORT for Render.com, fallback to 10000 for local development
@@ -34,14 +36,46 @@ app.get('/', (_req, res) => {
 // Add a last activity timestamp
 let lastActivity = Date.now();
 
+// Self-ping function
+async function selfPing() {
+    try {
+        const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
+        const response = await fetch(`${baseUrl}/ping`);
+        if (!response.ok) {
+            console.error('Self-ping failed:', await response.text());
+        } else {
+            console.log('Self-ping successful');
+        }
+    } catch (error) {
+        console.error('Self-ping error:', error);
+    }
+}
+
+// Start self-ping cron job (every 13 minutes)
+let selfPingCron: cron.ScheduledTask | null = null;
+
+function startSelfPingCron() {
+    if (selfPingCron) {
+        selfPingCron.stop();
+    }
+
+    selfPingCron = cron.schedule('*/13 * * * *', async () => {
+        console.log('Running self-ping cron job');
+        await selfPing();
+    });
+
+    // Trigger initial self-ping
+    selfPing();
+}
+
 // Update health check endpoint
 app.get('/health', (_req, res) => {
     lastActivity = Date.now();
     const uptime = process.uptime();
     const memoryUsage = process.memoryUsage();
-    
-    res.status(200).json({ 
-        status: 'ok', 
+
+    res.status(200).json({
+        status: 'ok',
         bot: bot.telegram ? 'connected' : 'disconnected',
         port: port,
         environment: process.env.NODE_ENV || 'development',
@@ -71,12 +105,23 @@ app.get('/monitor', (_req, res) => {
     }
 });
 
+// Add a wake-up endpoint
+app.get('/wake', (_req, res) => {
+    lastActivity = Date.now();
+    selfPing(); // Trigger an immediate self-ping
+    res.status(200).json({ status: 'ok', message: 'Wake-up signal sent' });
+});
+
 export function startServer() {
     return new Promise((resolve, reject) => {
         try {
             const server = app.listen(port, host, () => {
                 console.log(`Server running on http://${host}:${port}`);
                 console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+
+                // Start the self-ping cron job
+                startSelfPingCron();
+
                 resolve(server);
             });
 
@@ -93,6 +138,9 @@ export function startServer() {
             // Handle graceful shutdown
             const shutdown = () => {
                 console.log('Received shutdown signal. Starting graceful shutdown...');
+                if (selfPingCron) {
+                    selfPingCron.stop();
+                }
                 server.close(() => {
                     console.log('Server closed');
                     process.exit(0);

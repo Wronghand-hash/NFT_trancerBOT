@@ -864,28 +864,60 @@ bot.action(/alert_(.+)/, async (ctx) => {
 // Add a keep-alive ping function
 async function keepAlive() {
   try {
-    const response = await fetch('https://api.render.com/deploy/srv-xxxxx/keep-alive', {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${process.env.RENDER_API_KEY}`
-      }
-    });
-    if (!response.ok) {
-      log('Keep-alive ping failed:', await response.text());
+    // Try multiple keep-alive methods
+    const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT || 10000}`;
+    
+    // 1. Ping the local server
+    const localPing = await fetch(`${baseUrl}/ping`);
+    if (!localPing.ok) {
+      log('Local ping failed:', await localPing.text());
     }
+
+    // 2. Call the wake endpoint
+    const wakeCall = await fetch(`${baseUrl}/wake`);
+    if (!wakeCall.ok) {
+      log('Wake call failed:', await wakeCall.text());
+    }
+
+    // 3. Call Render.com's API if API key is available
+    if (process.env.RENDER_API_KEY) {
+      const renderPing = await fetch('https://api.render.com/deploy/srv-xxxxx/keep-alive', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${process.env.RENDER_API_KEY}`
+        }
+      });
+      if (!renderPing.ok) {
+        log('Render.com ping failed:', await renderPing.text());
+      }
+    }
+
+    log('Keep-alive sequence completed');
   } catch (error) {
-    log('Keep-alive ping error:', error);
+    log('Keep-alive sequence error:', error);
   }
 }
 
 // Update cron schedule to be more resilient
 let cronJob: cron.ScheduledTask | null = null;
+let keepAliveCron: cron.ScheduledTask | null = null;
 
 function startCronJob() {
   if (cronJob) {
     cronJob.stop();
   }
 
+  if (keepAliveCron) {
+    keepAliveCron.stop();
+  }
+
+  // Start keep-alive cron job (every 13 minutes)
+  keepAliveCron = cron.schedule('*/13 * * * *', async () => {
+    log('Running keep-alive cron job');
+    await keepAlive();
+  });
+
+  // Start NFT tracking cron job (every minute)
   cronJob = cron.schedule('* * * * *', async () => {
     try {
       const chatId = -1002611869947;
@@ -898,8 +930,8 @@ function startCronJob() {
     }
   });
 
-  // Start keep-alive ping every 14 minutes
-  setInterval(keepAlive, 14 * 60 * 1000);
+  // Trigger initial keep-alive
+  keepAlive();
 }
 
 // Update bot launch to include cron job start
@@ -913,7 +945,7 @@ bot.launch()
       
       // Start the cron job
       startCronJob();
-      console.log('Cron job started successfully');
+      console.log('Cron jobs started successfully');
     } catch (error) {
       console.error('Failed to start server:', error);
       // Don't exit process, let the bot continue running
@@ -924,11 +956,14 @@ bot.launch()
     process.exit(1);
   });
 
-// Update graceful stop to include cron job
+// Update graceful stop to include cron jobs
 process.once('SIGINT', () => {
   log('Stopping bot and cron jobs...');
   if (cronJob) {
     cronJob.stop();
+  }
+  if (keepAliveCron) {
+    keepAliveCron.stop();
   }
   bot.stop('SIGINT');
   process.exit(0);
@@ -938,6 +973,9 @@ process.once('SIGTERM', () => {
   log('Stopping bot and cron jobs...');
   if (cronJob) {
     cronJob.stop();
+  }
+  if (keepAliveCron) {
+    keepAliveCron.stop();
   }
   bot.stop('SIGTERM');
   process.exit(0);
@@ -951,14 +989,39 @@ bot.on('message', () => {
   lastActivity = Date.now();
 });
 
-// Monitor process health
-setInterval(() => {
-  const inactiveTime = Date.now() - lastActivity;
-  if (inactiveTime > 30 * 60 * 1000) { // 30 minutes
-    log('No activity detected for 30 minutes, restarting cron job...');
-    startCronJob();
-    lastActivity = Date.now();
+// Monitor process health with cron
+let healthCheckCron: cron.ScheduledTask | null = null;
+
+function startHealthCheckCron() {
+  if (healthCheckCron) {
+    healthCheckCron.stop();
   }
-}, 5 * 60 * 1000); // Check every 5 minutes
+
+  healthCheckCron = cron.schedule('*/5 * * * *', () => {
+    const inactiveTime = Date.now() - lastActivity;
+    if (inactiveTime > 15 * 60 * 1000) { // 30 minutes
+      log('No activity detected for 30 minutes, restarting services...');
+      startCronJob();
+      lastActivity = Date.now();
+    }
+  });
+}
+
+// Start health check cron
+startHealthCheckCron();
+
+// Add uncaught exception handler
+process.on('uncaughtException', (error) => {
+  log('Uncaught Exception:', error);
+  // Restart cron jobs on uncaught exception
+  startCronJob();
+});
+
+// Add unhandled rejection handler
+process.on('unhandledRejection', (reason) => {
+  log('Unhandled Rejection:', reason);
+  // Restart cron jobs on unhandled rejection
+  startCronJob();
+});
 
 export { bot };
