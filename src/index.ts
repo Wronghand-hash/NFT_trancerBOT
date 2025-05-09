@@ -861,7 +861,48 @@ bot.action(/alert_(.+)/, async (ctx) => {
   }
 });
 
-// Launch bot
+// Add a keep-alive ping function
+async function keepAlive() {
+  try {
+    const response = await fetch('https://api.render.com/deploy/srv-xxxxx/keep-alive', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${process.env.RENDER_API_KEY}`
+      }
+    });
+    if (!response.ok) {
+      log('Keep-alive ping failed:', await response.text());
+    }
+  } catch (error) {
+    log('Keep-alive ping error:', error);
+  }
+}
+
+// Update cron schedule to be more resilient
+let cronJob: cron.ScheduledTask | null = null;
+
+function startCronJob() {
+  if (cronJob) {
+    cronJob.stop();
+  }
+
+  cronJob = cron.schedule('* * * * *', async () => {
+    try {
+      const chatId = -1002611869947;
+      log(`[Cron] Running scheduled check for new buys`);
+      await lastBuy('trench_demons', 5, bot.telegram.sendPhoto.bind(bot.telegram, chatId));
+    } catch (error) {
+      log('[Cron] Error in scheduled execution:', error);
+      // Attempt to restart the cron job if it fails
+      setTimeout(startCronJob, 5000);
+    }
+  });
+
+  // Start keep-alive ping every 14 minutes
+  setInterval(keepAlive, 14 * 60 * 1000);
+}
+
+// Update bot launch to include cron job start
 bot.launch()
   .then(async () => {
     console.log('Bot started successfully');
@@ -869,6 +910,10 @@ bot.launch()
       // Start the server after bot is launched
       await startServer();
       console.log('Server started successfully');
+      
+      // Start the cron job
+      startCronJob();
+      console.log('Cron job started successfully');
     } catch (error) {
       console.error('Failed to start server:', error);
       // Don't exit process, let the bot continue running
@@ -879,40 +924,41 @@ bot.launch()
     process.exit(1);
   });
 
-// Update cron schedule to run every minute
-cron.schedule('* * * * *', async () => {
-  try {
-    const chatId = -1002611869947;
-    log(`[Cron] Running scheduled check for new buys`);
-    await lastBuy('trench_demons', 5, bot.telegram.sendPhoto.bind(bot.telegram, chatId));
-  } catch (error) {
-    log('[Cron] Error in scheduled execution:', error);
-  }
-});
-
-// Enable graceful stop
+// Update graceful stop to include cron job
 process.once('SIGINT', () => {
   log('Stopping bot and cron jobs...');
+  if (cronJob) {
+    cronJob.stop();
+  }
   bot.stop('SIGINT');
   process.exit(0);
 });
 
 process.once('SIGTERM', () => {
   log('Stopping bot and cron jobs...');
+  if (cronJob) {
+    cronJob.stop();
+  }
   bot.stop('SIGTERM');
   process.exit(0);
 });
 
-// Add uncaught exception handler
-process.on('uncaughtException', (error) => {
-  log('Uncaught Exception:', error);
-  // Don't exit process, let the bot continue running
+// Add process monitoring
+let lastActivity = Date.now();
+
+// Update activity timestamp on any bot message
+bot.on('message', () => {
+  lastActivity = Date.now();
 });
 
-// Add unhandled rejection handler
-process.on('unhandledRejection', (reason) => {
-  log('Unhandled Rejection:', reason);
-  // Don't exit process, let the bot continue running
-});
+// Monitor process health
+setInterval(() => {
+  const inactiveTime = Date.now() - lastActivity;
+  if (inactiveTime > 30 * 60 * 1000) { // 30 minutes
+    log('No activity detected for 30 minutes, restarting cron job...');
+    startCronJob();
+    lastActivity = Date.now();
+  }
+}, 5 * 60 * 1000); // Check every 5 minutes
 
 export { bot };

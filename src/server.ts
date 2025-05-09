@@ -31,14 +31,44 @@ app.get('/', (_req, res) => {
     `);
 });
 
-// Add health check endpoint
+// Add a last activity timestamp
+let lastActivity = Date.now();
+
+// Update health check endpoint
 app.get('/health', (_req, res) => {
+    lastActivity = Date.now();
+    const uptime = process.uptime();
+    const memoryUsage = process.memoryUsage();
+    
     res.status(200).json({ 
         status: 'ok', 
         bot: bot.telegram ? 'connected' : 'disconnected',
         port: port,
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        uptime: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${Math.floor(uptime % 60)}s`,
+        memory: {
+            heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+            heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+            rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`
+        },
+        lastActivity: new Date(lastActivity).toISOString()
     });
+});
+
+// Add a ping endpoint for keep-alive
+app.get('/ping', (_req, res) => {
+    lastActivity = Date.now();
+    res.status(200).send('pong');
+});
+
+// Add a monitor endpoint that returns 200 if the service is healthy
+app.get('/monitor', (_req, res) => {
+    const inactiveTime = Date.now() - lastActivity;
+    if (inactiveTime > 30 * 60 * 1000) { // 30 minutes
+        res.status(503).json({ status: 'error', message: 'Service inactive' });
+    } else {
+        res.status(200).json({ status: 'ok', lastActivity: new Date(lastActivity).toISOString() });
+    }
 });
 
 export function startServer() {
