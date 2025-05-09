@@ -734,7 +734,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
         };
 
         // Create a caption for the image with all details and links
-        const caption = `🌟 <b>Recent Sale Alert!</b> #${collectionSymbol}\n` +
+        const caption = `🌟 <b>New Sale Alert!</b> #${collectionSymbol}\n` +
           `━━━━━━━━━━━━━━━\n` +
           `🖼 <b>${nftName}</b>\n\n` +
           `💎 <b>Price:</b> ${price.toFixed(3)} SOL\n` +
@@ -758,7 +758,7 @@ const lastBuy = async (collectionSymbol: string, limit: number, ctx: any) => {
         ];
 
         // Create a fallback message without HTML for error cases
-        const fallbackMessage = `Recent Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}\nTime: ${formatDate(sale.blockTime * 1000)}`;
+        const fallbackMessage = `New Sale Alert!\n${nftName}\n${price.toFixed(3)} SOL\nBuyer: ${formatAddress(buyerAddress)}\nTime: ${formatDate(sale.blockTime * 1000)}`;
 
         log('Generated fallback message:', fallbackMessage);
 
@@ -918,8 +918,8 @@ function startCronJob() {
     await keepAlive();
   });
 
-  // Start NFT tracking cron job (every 5 minutes)
-  cronJob = cron.schedule('*/5 * * * *', async () => {
+  // Start NFT tracking cron job (every 4 minutes)
+  cronJob = cron.schedule('*/4 * * * *', async () => {
     try {
       const chatId = -1002611869947;
       log(`[Cron] Running scheduled check for new buys`);
