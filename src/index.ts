@@ -927,7 +927,7 @@ function startCronJob() {
   }
 
   // Start keep-alive cron job (every 13 minutes)
-  keepAliveCron = cron.schedule('*/13 * * * *', async () => {
+  keepAliveCron = cron.schedule('*/7 * * * *', async () => {
     log('Running keep-alive cron job');
     await keepAlive();
   });
